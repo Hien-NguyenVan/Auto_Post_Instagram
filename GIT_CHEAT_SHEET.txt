@@ -1,0 +1,114 @@
+================================================================================
+                         GIT WORKFLOW CHEAT SHEET
+================================================================================
+
+SETUP LẦN ĐẦU (1 lần duy nhất)
+===============================
+
+cd E:\tool_ld
+git init
+git remote add origin https://github.com/YOUR_USERNAME/instagram-tool.git
+git add .
+git commit -m "Initial commit"
+git push -u origin main
+
+
+MỖI KHI SỬA CODE (Workflow thường ngày)
+========================================
+
+# 1. Sửa file (ví dụ: utils/post.py)
+# 2. Test code
+python main.py
+
+# 3. Push lên GitHub
+git add .
+git commit -m "Fix post timing issue"
+git push origin main
+
+→ DONE! Code đã lên GitHub
+→ Thông báo users: "Có update, chạy updater.exe"
+
+
+USER UPDATE CODE
+================
+
+Lần đầu:
+  cd C:\InstagramTool_Portable
+  git init
+  git remote add origin https://github.com/YOUR_USERNAME/instagram-tool.git
+  git pull origin main
+
+Những lần sau:
+  Double-click: updater.exe
+  → Auto update!
+
+
+COMMANDS HAY DÙNG
+=================
+
+git status              # Xem files đã sửa
+git log --oneline       # Xem lịch sử
+git diff                # Xem thay đổi chi tiết
+git add utils/post.py   # Add file cụ thể
+git add .               # Add tất cả
+git commit -m "msg"     # Commit
+git push origin main    # Push
+
+
+VÍ DỤ WORKFLOW THỰC TẾ
+=======================
+
+Scenario: Bạn sửa 3 files
+
+cd E:\tool_ld
+git status
+→ modified:   utils/post.py
+→ modified:   tabs/tab_post.py
+→ modified:   README.txt
+
+git add .
+git commit -m "Update post feature
+- Fix timing issue in post.py
+- Add retry logic in tab_post.py
+- Update README"
+
+git push origin main
+
+→ DONE!
+
+
+ROLLBACK (nếu cần)
+==================
+
+# Undo commit cuối (chưa push)
+git reset --soft HEAD~1
+
+# Undo commit cuối (đã push) - CẨNH THẬN!
+git reset --hard HEAD~1
+git push origin main --force
+
+
+UPDATE VERSION
+==============
+
+echo v1.0.1 > version.txt
+git add version.txt
+git commit -m "Bump to v1.0.1"
+git push origin main
+
+
+TROUBLESHOOTING
+===============
+
+Lỗi: Permission denied
+→ Dùng Personal Access Token
+
+Lỗi: Updates rejected
+→ git pull origin main
+→ git push origin main
+
+Lỗi: Git not found
+→ Install: https://git-scm.com/download/win
+
+
+================================================================================

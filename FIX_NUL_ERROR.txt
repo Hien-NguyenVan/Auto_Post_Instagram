@@ -1,0 +1,65 @@
+================================================================================
+                    ĐÃ FIX LỖI "nul" FILE
+================================================================================
+
+LỖI:
+----
+error: unable to index file 'nul'
+fatal: adding files failed
+
+NGUYÊN NHÂN:
+-----------
+File "nul" là device file đặc biệt trong Windows, git không thể index được.
+File này được tạo ra do redirect output (>nul) trong các commands trước đó.
+
+ĐÃ FIX:
+-------
+1. ✅ Xóa file "nul"
+2. ✅ Thêm "nul" vào .gitignore
+3. ✅ Thêm ".claude/" vào .gitignore
+4. ✅ git add . thành công!
+
+HIỆN TẠI:
+---------
+Tất cả files đã được staged và sẵn sàng commit!
+
+TIẾP TỤC:
+---------
+
+Bạn có thể chạy 1 trong 2 cách:
+
+Cách 1: Chạy lại setup_github.bat
+----------------------------------
+setup_github.bat
+
+→ Script sẽ tự động commit và push
+
+
+Cách 2: Manual commands
+-----------------------
+# 1. Commit
+git commit -m "Initial commit - Instagram Automation Tool v1.0"
+
+# 2. Set branch to main
+git branch -M main
+
+# 3. Push to GitHub (nếu đã add remote)
+git push -u origin main
+
+# Nếu chưa add remote:
+git remote add origin https://github.com/YOUR_USERNAME/REPO_NAME.git
+git push -u origin main
+
+
+CHECK STATUS:
+-------------
+git status
+
+→ Hiện tại sẽ thấy:
+   "Changes to be committed"
+   "new file: ..." (45+ files)
+
+
+DONE! ✅
+
+================================================================================

@@ -1,0 +1,422 @@
+================================================================================
+                    HƯỚNG DẪN SETUP GITHUB VÀ UPDATE CODE
+================================================================================
+
+Ngày tạo: 2025-11-07
+
+================================================================================
+PHẦN 1: SETUP GITHUB LẦN ĐẦU (Developer - Bạn)
+================================================================================
+
+BƯỚC 1: Tạo GitHub Repository
+------------------------------
+
+1. Vào https://github.com/new
+2. Điền thông tin:
+   - Repository name: instagram-automation-tool (hoặc tên khác)
+   - Description: Instagram Automation Tool với LDPlayer
+   - Visibility:
+     * Private (nếu muốn chỉ mình bạn thấy)
+     * Public (nếu muốn public)
+   - Không check "Initialize with README" (vì đã có code)
+3. Click "Create repository"
+
+Bạn sẽ có repo URL như:
+https://github.com/YOUR_USERNAME/instagram-automation-tool.git
+
+
+BƯỚC 2: Init Git và Push Code Lần Đầu
+--------------------------------------
+
+Mở Command Prompt/Terminal trong thư mục dự án:
+
+# Khởi tạo git (nếu chưa có)
+cd E:\tool_ld
+git init
+
+# Thêm remote (thay YOUR_USERNAME bằng username GitHub của bạn)
+git remote add origin https://github.com/YOUR_USERNAME/instagram-automation-tool.git
+
+# Xem file nào sẽ được commit (optional)
+git status
+
+# Add tất cả files (trừ file trong .gitignore)
+git add .
+
+# Commit với message
+git commit -m "Initial commit - Instagram Automation Tool v1.0"
+
+# Push lên GitHub (lần đầu)
+git push -u origin main
+
+# Nếu bị lỗi "main" not found, thử:
+git branch -M main
+git push -u origin main
+
+
+BƯỚC 3: Xác Thực GitHub
+------------------------
+
+Nếu GitHub yêu cầu đăng nhập:
+
+Option A - Personal Access Token (Khuyến nghị):
+1. Vào GitHub Settings → Developer settings → Personal access tokens
+2. Generate new token (classic)
+3. Chọn scopes: repo (tất cả)
+4. Copy token (chỉ hiện 1 lần!)
+5. Khi git push hỏi password, paste token này
+
+Option B - GitHub Desktop:
+1. Download GitHub Desktop: https://desktop.github.com/
+2. Login với GitHub account
+3. Clone repo và làm việc qua GUI
+
+
+BƯỚC 4: Verify Setup Thành Công
+--------------------------------
+
+Vào https://github.com/YOUR_USERNAME/instagram-automation-tool
+→ Bạn sẽ thấy tất cả files đã được upload
+
+✅ Setup GitHub hoàn tất!
+
+
+================================================================================
+PHẦN 2: WORKFLOW KHI SỬA CODE (Developer - Bạn)
+================================================================================
+
+Ví dụ: Bạn vừa sửa file utils/post.py
+
+BƯỚC 1: Kiểm Tra Thay Đổi
+--------------------------
+
+cd E:\tool_ld
+git status
+
+→ Bạn sẽ thấy:
+  modified:   utils/post.py
+
+
+BƯỚC 2: Test Code Trước Khi Push
+---------------------------------
+
+# Chạy test để đảm bảo code không bị lỗi
+python main.py
+
+# Hoặc test specific function
+python -c "from utils.post import post_video; print('OK')"
+
+
+BƯỚC 3: Commit và Push
+-----------------------
+
+# Add file đã sửa
+git add utils/post.py
+
+# Hoặc add tất cả files đã sửa
+git add .
+
+# Commit với message mô tả rõ ràng
+git commit -m "Fix post video timing issue"
+
+# Push lên GitHub
+git push origin main
+
+→ Code đã được update lên GitHub!
+
+
+BƯỚC 4: Update Version (Optional nhưng khuyến nghị)
+----------------------------------------------------
+
+# Update version number
+echo v1.0.1 > version.txt
+
+# Commit version update
+git add version.txt
+git commit -m "Bump version to v1.0.1"
+git push origin main
+
+
+BƯỚC 5: Thông Báo User Có Update Mới
+-------------------------------------
+
+Option A - Thông báo trực tiếp:
+- Nhắn tin cho users: "Có update mới, chạy updater.exe"
+
+Option B - Auto-check trong app (future feature):
+- Thêm function check version từ GitHub
+- Hiển thị notification khi có update
+
+
+================================================================================
+PHẦN 3: WORKFLOW CHO USERS ĐỂ UPDATE CODE
+================================================================================
+
+LẦN ĐẦU TIÊN (User cần setup git)
+----------------------------------
+
+1. User extract ZIP file vào: C:\InstagramTool_Portable\
+
+2. Mở Command Prompt trong folder đó:
+   cd C:\InstagramTool_Portable
+
+3. Init git và connect tới GitHub repo của bạn:
+   git init
+   git remote add origin https://github.com/YOUR_USERNAME/instagram-automation-tool.git
+   git pull origin main
+
+4. Xong! Giờ user có thể dùng updater.exe
+
+
+NHỮNG LẦN SAU (User chỉ cần chạy updater.exe)
+----------------------------------------------
+
+1. User double-click: updater.exe
+
+2. Updater sẽ tự động:
+   ✅ Backup code hiện tại → backups/backup_YYYYMMDD_HHMMSS/
+   ✅ Chạy: git pull origin main
+   ✅ Download code mới từ GitHub
+   ✅ Update dependencies: pip install -r requirements.txt --upgrade
+   ✅ Hiển thị thông báo update thành công
+
+3. User chạy lại tool: run_tool.bat
+   → Tool chạy với code mới!
+
+
+================================================================================
+PHẦN 4: CÁC TRƯỜNG HỢP THƯỜNG GẶP
+================================================================================
+
+Trường hợp 1: Sửa nhiều files cùng lúc
+---------------------------------------
+
+# Xem tất cả files đã sửa
+git status
+
+# Add tất cả
+git add .
+
+# Hoặc add từng loại
+git add utils/*.py
+git add tabs/*.py
+git add core/*.py
+
+# Commit với message chi tiết
+git commit -m "Update post and follow features
+- Fix timing issue in utils/post.py
+- Add retry logic in tabs/tab_post.py
+- Improve error handling"
+
+# Push
+git push origin main
+
+
+Trường hợp 2: Muốn xem lịch sử commits
+---------------------------------------
+
+# Xem lịch sử
+git log --oneline
+
+# Xem thay đổi trong 1 commit cụ thể
+git show COMMIT_HASH
+
+
+Trường hợp 3: Rollback về version cũ
+-------------------------------------
+
+# Xem list commits
+git log --oneline
+
+# Rollback về commit cũ
+git reset --hard COMMIT_HASH
+
+# Force push (cẩn thận!)
+git push origin main --force
+
+# Users sẽ cần chạy: git reset --hard origin/main
+
+
+Trường hợp 4: Branch cho development
+-------------------------------------
+
+# Tạo branch mới để test feature
+git checkout -b feature-new-ui
+
+# Làm việc trên branch này
+git add .
+git commit -m "Add new UI"
+git push origin feature-new-ui
+
+# Merge vào main khi test xong
+git checkout main
+git merge feature-new-ui
+git push origin main
+
+
+Trường hợp 5: File quá lớn (video, binary)
+-------------------------------------------
+
+# Thêm vào .gitignore để không commit
+echo "*.mp4" >> .gitignore
+echo "*.avi" >> .gitignore
+echo "downloads/*" >> .gitignore
+
+# Commit .gitignore
+git add .gitignore
+git commit -m "Ignore large files"
+
+
+================================================================================
+PHẦN 5: CHECKLIST WORKFLOW HOÀN CHỈNH
+================================================================================
+
+MỖI KHI SỬA CODE:
+-----------------
+
+Developer (Bạn):
+[ ] 1. Sửa code (ví dụ: utils/post.py)
+[ ] 2. Test code: python main.py
+[ ] 3. git add utils/post.py
+[ ] 4. git commit -m "Fix post timing"
+[ ] 5. git push origin main
+[ ] 6. (Optional) Update version.txt
+[ ] 7. Thông báo users: "Update available, run updater.exe"
+
+User:
+[ ] 1. Nhận thông báo có update
+[ ] 2. Double-click: updater.exe
+[ ] 3. Đợi update hoàn tất (1-2 phút)
+[ ] 4. Run lại: run_tool.bat
+[ ] 5. Tool chạy với code mới ✅
+
+
+================================================================================
+PHẦN 6: COMMANDS THAM KHẢO NHANH
+================================================================================
+
+# Setup lần đầu
+git init
+git remote add origin https://github.com/YOUR_USERNAME/repo.git
+git add .
+git commit -m "Initial commit"
+git push -u origin main
+
+# Workflow hàng ngày
+git status                    # Xem files đã sửa
+git add .                     # Add tất cả
+git commit -m "Your message"  # Commit
+git push origin main          # Push lên GitHub
+
+# Xem thông tin
+git log --oneline            # Lịch sử commits
+git diff                     # Xem thay đổi chưa commit
+git remote -v                # Xem remote URL
+
+# Rollback
+git reset --hard HEAD~1      # Undo commit cuối cùng (cẩn thận!)
+git reset --soft HEAD~1      # Undo commit nhưng giữ changes
+
+# Sync với remote
+git fetch origin             # Lấy thông tin mới nhất
+git pull origin main         # Pull code mới về
+
+
+================================================================================
+PHẦN 7: TROUBLESHOOTING
+================================================================================
+
+Lỗi: "Git not found"
+→ Cài Git: https://git-scm.com/download/win
+→ Restart Command Prompt
+
+Lỗi: "Permission denied (publickey)"
+→ Dùng Personal Access Token thay vì password
+
+Lỗi: "Updates were rejected"
+→ git pull origin main trước, sau đó git push
+
+Lỗi: User không update được
+→ Kiểm tra user đã init git chưa
+→ Kiểm tra user có internet không
+→ User chạy manual: git pull origin main
+
+Lỗi: Merge conflict
+→ git status để xem file conflict
+→ Sửa file conflict thủ công
+→ git add . && git commit -m "Resolve conflict"
+
+
+================================================================================
+PHẦN 8: BEST PRACTICES
+================================================================================
+
+✅ DO:
+- Commit thường xuyên với message rõ ràng
+- Test code trước khi push
+- Update version.txt khi có thay đổi lớn
+- Thông báo users khi có update quan trọng
+- Backup trước khi rollback
+
+❌ DON'T:
+- Đừng commit file nhạy cảm (API keys, passwords)
+- Đừng commit file quá lớn (videos, datasets)
+- Đừng force push trừ khi thật sự cần thiết
+- Đừng sửa trực tiếp trên GitHub web (dễ conflict)
+
+
+================================================================================
+PHẦN 9: GIT HOOKS (ADVANCED - OPTIONAL)
+================================================================================
+
+Tự động test trước khi commit:
+
+1. Tạo file: .git/hooks/pre-commit
+
+#!/bin/bash
+echo "Running tests before commit..."
+python test_config.py
+if [ $? -ne 0 ]; then
+    echo "Tests failed! Commit aborted."
+    exit 1
+fi
+
+2. Chmod:
+chmod +x .git/hooks/pre-commit
+
+→ Mỗi lần commit, git sẽ tự động chạy test
+
+
+================================================================================
+PHẦN 10: GITHUB RELEASES (OPTIONAL)
+================================================================================
+
+Tạo Release cho version lớn:
+
+1. Vào GitHub repo → Releases → Create new release
+2. Tag version: v1.0.0
+3. Release title: Version 1.0.0 - Initial Release
+4. Description:
+   - Changelog (những gì mới)
+   - Bug fixes
+   - Known issues
+5. Attach files:
+   - InstagramTool_Portable_20251107.zip
+6. Publish release
+
+→ Users có thể download ZIP trực tiếp từ GitHub Releases
+
+
+================================================================================
+
+DONE! 🎉
+
+Với hướng dẫn này, bạn đã sẵn sàng để:
+- Setup GitHub repo
+- Push code lần đầu
+- Update code mỗi khi sửa
+- Users có thể tự update dễ dàng
+
+Còn thắc mắc gì không? 😊
+
+================================================================================

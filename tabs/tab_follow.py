@@ -1,0 +1,1429 @@
+# -*- coding: utf-8 -*-
+"""
+YouTube Multi-Stream Watcher GUI
+- Nút API: quản lý list API key từ E:\tool_ld\data\api\youtube.txt (thêm/xóa/lưu)
+- Nút "Thêm luồng" (góc trên bên phải)
+- Bảng liệt kê luồng: STT, Tên luồng, Theo dõi trang, Thời gian quét, Trạng thái, Chạy, Dừng, Log, Sửa, Xóa
+- Mỗi luồng chạy độc lập & đồng thời (thread)
+- Lần đầu: lấy video có publishedAt > start_time (giờ VN)
+- Về sau: chỉ lấy video có publishedAt > video mới nhất trong file kết quả
+- Lọc: Shorts (<60s), Long (>=60s), hoặc Cả 2
+- Lưu kết quả mỗi luồng: E:\tool_ld\data\output\<slug_ten_luong>.json  (chỉ 4 trường: title, publishedAt, duration, url)
+"""
+import subprocess
+import os
+import re
+import json
+import time
+import queue
+import threading
+import logging
+from datetime import datetime, timezone, timedelta
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+import traceback
+import sys
+from utils.download_dlp import download_video_api
+from utils.send_file import send_file_api
+from utils.post import InstagramPost
+from utils.delete_file import clear_dcim
+from utils.vm_manager import vm_manager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from config import LDCONSOLE_EXE
+from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, TIMEOUT_DEFAULT
+# Sau dòng: from utils.delete_file import clear_dcim
+# THÊM VÀO:
+
+class StoppableWorker:
+    """Helper class để chạy tác vụ có thể dừng"""
+    
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+        self.current_process = None
+        self.executor = ThreadPoolExecutor(max_workers=1)
+    
+    def run_blocking_func(self, func, *args, timeout=300, check_interval=1, **kwargs):
+        """
+        Chạy hàm blocking với khả năng dừng
+        
+        Args:
+            func: Hàm cần chạy
+            timeout: Thời gian tối đa (giây)
+            check_interval: Kiểm tra stop_event mỗi X giây
+        
+        Returns:
+            (success, result, reason)
+        """
+        future = self.executor.submit(func, *args, **kwargs)
+        
+        elapsed = 0
+        while elapsed < timeout:
+            if self.stop_event.is_set():
+                future.cancel()
+                return (False, None, "stopped")
+            
+            if future.done():
+                try:
+                    result = future.result(timeout=0.1)
+                    return (True, result, "completed")
+                except Exception as e:
+                    return (False, None, f"error: {e}")
+            
+            time.sleep(check_interval)
+            elapsed += check_interval
+        
+        future.cancel()
+        return (False, None, "timeout")
+    
+    def run_subprocess(self, cmd_list, timeout=300, check_interval=0.5):
+        """
+        Chạy subprocess với khả năng dừng
+        
+        Returns:
+            (success, returncode, reason)
+        """
+        try:
+            self.current_process = subprocess.Popen(
+                cmd_list,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            elapsed = 0
+            while elapsed < timeout:
+                if self.stop_event.is_set():
+                    self._kill_process()
+                    return (False, None, "stopped")
+                
+                retcode = self.current_process.poll()
+                if retcode is not None:
+                    return (True, retcode, "completed")
+                
+                time.sleep(check_interval)
+                elapsed += check_interval
+            
+            self._kill_process()
+            return (False, None, "timeout")
+            
+        except Exception as e:
+            return (False, None, f"error: {e}")
+        finally:
+            self.current_process = None
+    
+    def _kill_process(self):
+        """Kill process an toàn"""
+        if self.current_process:
+            try:
+                self.current_process.terminate()
+                self.current_process.wait(timeout=5)
+            except:
+                try:
+                    self.current_process.kill()
+                except:
+                    pass
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        self._kill_process()
+        self.executor.shutdown(wait=False)
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Đường dẫn đến thư mục data của tab_user
+USER_DATA_DIR = os.path.join(os.getcwd(), "data")
+
+from utils.yt_api import (
+    APIKeyManager,
+    extract_channel_id,
+    get_uploads_playlist_id,
+    iter_playlist_videos_newer_than,
+    fetch_video_details,
+    filter_videos_by_mode,
+    parse_vn_datetime,
+    iso_to_datetime,
+    datetime_to_iso,
+    check_api_key_valid
+)
+
+from utils.tiktok_api import fetch_tiktok_videos_newer_than
+
+def get_vm_list_with_insta():
+    """Lấy danh sách máy ảo kèm tên Instagram từ data/"""
+    vm_list = []
+    try:
+        if not os.path.exists(USER_DATA_DIR):
+            return vm_list
+        
+        files = [f for f in os.listdir(USER_DATA_DIR) if f.endswith(".json")]
+        for f in files:
+            path = os.path.join(USER_DATA_DIR, f)
+            with open(path, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+                vm_name = data.get("vm_name", "")
+                insta_name = data.get("insta_name", "")
+                display = f"{vm_name} - {insta_name}" if insta_name else vm_name
+                vm_list.append({"vm_name": vm_name, "display": display})
+    except Exception as e:
+        print(f"Lỗi khi đọc danh sách máy ảo: {e}")
+    
+    return vm_list
+def show_exception_dialog(title: str, err: Exception):
+    tb = traceback.format_exc(limit=3)
+    messagebox.showerror(title, f"{err}\n\n{tb}")
+
+# ========================= CẤU HÌNH ĐƯỜNG DẪN =========================
+API_FILE = os.path.join(os.getcwd(), "data", "api", "youtube.txt")
+OUTPUT_DIR = "data/output"
+STREAMS_META = os.path.join(OUTPUT_DIR, "streams.json")
+
+# ========================= HẰNG SỐ / TIỆN ÍCH =========================
+VN_TZ = timezone(timedelta(hours=7))  # Asia/Ho_Chi_Minh (UTC+7)
+LOCK = threading.Lock()  # khóa chung cho trạng thái chia sẻ
+
+# Khởi tạo API Key Manager
+api_manager = APIKeyManager(API_FILE)
+
+def ensure_dirs():
+    os.makedirs(os.path.dirname(API_FILE), exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    if not os.path.exists(API_FILE):
+        with open(API_FILE, "w", encoding="utf-8") as f:
+            f.write("")  # file rỗng ban đầu
+    if not os.path.exists(STREAMS_META):
+        with open(STREAMS_META, "w", encoding="utf-8") as f:
+            json.dump({"streams": []}, f, ensure_ascii=False, indent=2)
+
+def slugify(name: str) -> str:
+    s = re.sub(r"[^a-zA-Z0-9\-_\s]+", "", name)
+    s = re.sub(r"\s+", "_", s).strip("_")
+    return s or "stream"
+
+def load_streams_meta():
+    ensure_dirs()
+    with open(STREAMS_META, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_streams_meta(meta):
+    ensure_dirs()
+    with open(STREAMS_META, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+def load_existing_urls(path: str) -> set:
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {d.get("url") for d in data if isinstance(d, dict)}
+    except Exception:
+        return set()
+
+def newest_published_at(path: str, default_iso: str) -> datetime:
+    """Đọc file kết quả để xác định mốc mới nhất; nếu không có thì dùng default_iso."""
+    newest = iso_to_datetime(default_iso)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for d in data:
+                pub = d.get("publishedAt")
+                if pub:
+                    dtp = iso_to_datetime(pub)
+                    if dtp > newest:
+                        newest = dtp
+        except Exception:
+            pass
+    return newest
+
+def _atomic_write_json(path, data):
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)  # atomic trên Windows/Unix
+    
+def append_records(path: str, new_rows: list):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = []
+    known = {d["url"] for d in data if isinstance(d, dict) and "url" in d}
+    for r in sorted(new_rows, key=lambda x: x["publishedAt"]):
+        if r["url"] not in known:
+            data.append(r); known.add(r["url"])
+    _atomic_write_json(path, data)
+    return len(new_rows)
+
+def reset_output_file(path: str):
+    """Xoá nội dung file kết quả của luồng và tạo file rỗng."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)  # xoá file cũ
+        # tạo file rỗng (có thể bỏ nếu muốn để tool tự tạo lúc ghi lần đầu)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+# ========================= QUẢN LÝ LUỒNG =========================
+class Stream:
+    def __init__(self, cfg: dict, row_id: str, log_callback=None):
+        self.cfg = cfg  # dict: id, name, start_vn, channels, mode, interval_min, out_path
+        self.row_id = row_id
+        self.thread = None
+        self.stop_event = threading.Event()
+        self.next_deadline = None  # datetime (UTC) cho lần chạy tiếp theo
+        self.status = "Chưa chạy"
+        self.logs = []
+        self.log_callback = log_callback
+        self.worker_helper = None
+
+    def log(self, msg: str):
+        stamp = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
+        line = f"[{stamp}] {msg}"
+        self.logs.append(line)
+        if len(self.logs) > 1000:
+            self.logs = self.logs[-1000:]
+        # 🟢 gọi callback realtime
+        if self.log_callback:
+            self.log_callback(self.row_id, line)
+
+    def is_running(self):
+        return self.thread is not None and self.thread.is_alive()
+
+    def start(self, ui_queue):
+        if self.is_running():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self.worker, args=(ui_queue,), daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.worker_helper:
+            self.worker_helper.cleanup()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5)
+
+    def worker(self, ui_queue: queue.Queue):
+        self.worker_helper = StoppableWorker(self.stop_event)
+        logger = logging.getLogger(f"{__name__}.Stream.{self.cfg['name']}")
+        try:
+            self.status = "Đang chạy (khởi tạo)"
+            ui_queue.put(("status", self.row_id, self.status))
+            
+            default_cutoff_utc = parse_vn_datetime(self.cfg["start_vn"], VN_TZ).astimezone(timezone.utc)
+            default_cutoff_iso = datetime_to_iso(default_cutoff_utc)
+            cutoff_dt = newest_published_at(self.cfg["out_path"], default_cutoff_iso)
+            
+            auto_poster = InstagramPost(
+                log_callback=lambda vm, msg: self.log(f"[{vm}] {msg}")
+            )
+            
+            # ========== VÒNG LẶP CHÍNH ==========
+            while not self.stop_event.is_set():
+                self.log("Bắt đầu quét...")
+
+                platform = self.cfg.get("platform", "youtube")
+
+                # CHỈ KHAI BÁO all_new_ids KHI LÀ YOUTUBE
+                all_new_ids = []
+
+                if platform == "youtube":
+                    # ========== QUÉT KÊNH YOUTUBE ==========
+                    for ch_url in self.cfg["channels"]:
+                        if self.stop_event.is_set():
+                            self.log("🛑 Dừng quét kênh")
+                            break
+                        
+                        try:
+                            cid = extract_channel_id(ch_url, api_manager)
+                            pid = get_uploads_playlist_id(cid, api_manager)
+                            
+                            ids = []
+                            for vid, pub in iter_playlist_videos_newer_than(pid, cutoff_dt, api_manager):
+                                if self.stop_event.is_set():
+                                    break
+                                ids.append(vid)
+                            
+                            if ids:
+                                all_new_ids.extend(ids)
+                                self.log(f"[YouTube] {ch_url}: tìm thấy {len(ids)} video mới.")
+                            else:
+                                self.log(f"[YouTube] {ch_url}: không có video mới.")
+                        except Exception as e:
+                            self.log(f"[YouTube] Lỗi kênh {ch_url}: {e}")
+
+                elif platform == "tiktok":
+                    # ========== QUÉT KÊNH TIKTOK ==========
+                    # Không dùng extract_channel_id / playlist của YouTube
+                    pass
+                else:
+                    self.log(f"Nền tảng chưa hỗ trợ: {platform}")
+
+                
+                # Check trước khi xử lý video
+                if self.stop_event.is_set():
+                    break
+                
+                # ========== XỬ LÝ VIDEO ==========
+                # === Xử lý lấy video mới (YouTube hoặc TikTok) ===
+                # ========== XỬ LÝ VIDEO ==========
+                new_rows = []
+
+                if self.cfg.get("platform", "youtube") == "youtube":
+                    if all_new_ids:
+                        details = fetch_video_details(all_new_ids, api_manager)
+                        for r in details:
+                            if iso_to_datetime(r["publishedAt"]) <= cutoff_dt:
+                                continue
+                            new_rows.append(r)
+                        
+                        new_rows = filter_videos_by_mode(new_rows, self.cfg["mode"])
+                        
+                        if new_rows:
+                            added = append_records(self.cfg["out_path"], new_rows)
+                            self.log(f"Đã thêm {added}/{len(new_rows)} video mới vào file.")
+                        else:
+                            self.log("Không có video phù hợp sau khi lọc.")
+                    else:
+                        self.log("Không có video mới.")
+
+                elif self.cfg.get("platform") == "tiktok":
+                    # from utils.tiktok_api import fetch_tiktok_videos_newer_than
+                    new_rows = []
+                    for ch_url in self.cfg.get("channels", []):
+                        try:
+                            vids = fetch_tiktok_videos_newer_than(ch_url, cutoff_dt)
+                            if vids:
+                                new_rows.extend(vids)
+                                self.log(f"[TikTok] {ch_url}: +{len(vids)} video mới.")
+                            else:
+                                self.log(f"[TikTok] {ch_url}: không có video mới.")
+                        except Exception as e:
+                            self.log(f"[TikTok] Lỗi lấy video từ {ch_url}: {e}")
+
+                    if new_rows:
+                        added = append_records(self.cfg["out_path"], new_rows)
+                        self.log(f"🎵 Đã thêm {added}/{len(new_rows)} video TikTok mới vào file.")
+                    else:
+                        self.log("Không có video TikTok mới.")
+
+                else:
+                    self.log(f"Nền tảng chưa hỗ trợ: {self.cfg.get('platform')}")
+
+
+                self.log("Kiểm tra nếu có video cũ chưa đăng thì sẽ đăng")
+   
+                # ========== ĐĂNG VIDEO ==========
+                try:
+                    with open(self.cfg["out_path"], "r", encoding="utf-8") as f:
+                        all_videos = json.load(f)
+
+                    vm_name = self.cfg.get("vm_name")
+
+                    for vid in all_videos:
+                        vm_acquired = False  # Reset flag cho mỗi video
+
+                        # Check trước mỗi video
+                        if self.stop_event.is_set():
+                            self.log("🛑 Dừng xử lý video")
+                            break
+
+                        if vid.get("status") != "unpost":
+                            continue
+
+                        url = vid.get("url", "")
+                        title = vid.get("title", "<3")
+                        self.log(f"🎬 [Bắt đầu] Xử lý video: {title}")
+
+                        # ========== ACQUIRE VM LOCK ==========
+                        self.log(f"🔒 Chờ máy ảo '{vm_name}' sẵn sàng...")
+                        if not vm_manager.acquire_vm(vm_name, timeout=600, caller=f"Follow:{self.cfg['name']}"):
+                            self.log(f"⏱️ Timeout chờ máy ảo '{vm_name}' sau 10 phút - Bỏ qua video")
+                            continue
+
+                        vm_acquired = True
+                        self.log(f"✅ Đã khóa máy ảo '{vm_name}'")
+
+                        # Wrap toàn bộ logic xử lý video trong try/finally để đảm bảo release
+                        try:
+                            # ========== KIỂM TRA MÁY ẢO (Option 3: subprocess) ==========
+                            try:
+                                result = subprocess.run(
+                                    [LDCONSOLE_EXE, "list2"],
+                                    capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+                                )
+                                is_running = False
+                                for line in result.stdout.splitlines():
+                                    parts = line.split(",")
+                                    if len(parts) >= 5 and parts[1].strip() == vm_name:
+                                        is_running = (parts[4].strip() == "1")
+                                        break
+                            except Exception as e:
+                                self.log(f"⚠️ Không thể kiểm tra trạng thái máy ảo: {e}")
+                                logger.exception("Error checking VM status")
+                                is_running = True  # Assume running để skip video
+
+                            # 🧩 2️⃣ Nếu máy ảo đang bật → bỏ qua video
+                            if is_running:
+                                self.log(f"⚠️ Máy ảo '{vm_name}' đang bật — bỏ qua video {title}")
+                            else:
+                                # ========== BẬT MÁY ẢO ==========
+                                if self.stop_event.is_set():
+                                    break
+
+                                self.log(f"🚀 Bật máy ảo '{vm_name}' để đăng video: {title}")
+                                subprocess.run([LDCONSOLE_EXE, "launch", "--name", vm_name],
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
+
+                                # Wait for VM to be fully ready
+                                self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động hoàn toàn...")
+                                if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=60):
+                                    self.log(f"⏱️ Timeout - Máy ảo '{vm_name}' không khởi động được")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    continue
+
+                                # Wait a bit more for ADB to connect
+                                self.log(f"⏳ Chờ ADB kết nối...")
+                                time.sleep(WAIT_MEDIUM)
+
+                                # ========== TẢI VIDEO (Option 2: Thread + timeout) ==========
+                                if self.stop_event.is_set():
+                                    break
+
+                                self.log(f"📥 Đang tải video: {title}")
+                                success, video_path, reason = self.worker_helper.run_blocking_func(
+                                    download_video_api,
+                                    url,
+                                    log_callback=lambda msg: self.log(msg),
+                                    timeout=600,  # 10 phút
+                                    check_interval=2
+                                )
+
+                                if not success:
+                                    if reason == "stopped":
+                                        self.log("🛑 Dừng tải video")
+                                        # Tắt máy ảo trước khi break
+                                        self.worker_helper.run_subprocess(
+                                            [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                            timeout=30
+                                        )
+                                        break
+                                    else:
+                                        self.log(f"❌ Không thể tải video: {reason}")
+                                        self.worker_helper.run_subprocess(
+                                            [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                            timeout=30
+                                        )
+                                        continue
+
+                                if not video_path or not os.path.exists(video_path):
+                                    self.log(f"❌ File video không tồn tại")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    continue
+
+                                self.log(f"✅ Đã tải xong: {video_path}")
+                                time.sleep(15)
+
+                                # ========== GỬI FILE (Option 2) ==========
+                                if self.stop_event.is_set():
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    break
+
+                                self.log(f"📤 Gửi file sang máy ảo")
+                                success, success_push, reason = self.worker_helper.run_blocking_func(
+                                    send_file_api,
+                                    video_path,
+                                    vm_name,
+                                    log_callback=lambda msg: self.log(msg),
+                                    timeout=300,
+                                    check_interval=2
+                                )
+
+                                if not success or not success_push:
+                                    if reason == "stopped":
+                                        self.log("🛑 Dừng gửi file")
+                                    else:
+                                        self.log(f"⚠️ Gửi file thất bại: {reason}")
+
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+
+                                    if reason == "stopped":
+                                        break
+                                    else:
+                                        continue
+
+                                self.log(f"✅ Đã gửi video sang máy ảo")
+                                time.sleep(WAIT_MEDIUM)
+
+                                # ========== REBOOT MÁY ẢO ==========
+                                if self.stop_event.is_set():
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    break
+
+                                self.log(f"🔄 Khởi động lại '{vm_name}'")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "reboot", "--name", vm_name],
+                                    timeout=60
+                                )
+                                time.sleep(WAIT_LONG)
+
+                                # ========== ĐĂNG BÀI (Option 2) ==========
+                                if self.stop_event.is_set():
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    break
+
+                                self.log(f"📲 Đang đăng video: {title}")
+
+                                vm_file = os.path.join("data", f"{vm_name}.json")
+                                with open(vm_file, "r", encoding="utf-8") as f:
+                                    vm_info = json.load(f)
+                                port = vm_info.get("port")
+                                adb_address = f"emulator-{port}"
+
+                                success, success_post, reason = self.worker_helper.run_blocking_func(
+                                    auto_poster.auto_post,
+                                    vm_name,
+                                    adb_address,
+                                    title,
+                                    timeout=600,
+                                    check_interval=2
+                                )
+
+                                if not success or not success_post:
+                                    if reason == "stopped":
+                                        self.log("🛑 Dừng đăng bài")
+                                    else:
+                                        self.log(f"❌ Lỗi đăng bài: {reason}")
+
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+
+                                    if reason == "stopped":
+                                        break
+                                    else:
+                                        continue
+
+                                self.log(f"✅ Đã đăng thành công: {title}")
+
+                                # ========== XÓA FILE ==========
+                                if self.stop_event.is_set():
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    break
+
+                                success, success_delete, reason = self.worker_helper.run_blocking_func(
+                                    clear_dcim,
+                                    adb_address,
+                                    log_callback=lambda msg: self.log(msg),
+                                    timeout=60,
+                                    check_interval=1
+                                )
+
+                                if success and success_delete:
+                                    self.log(f"✅ Xóa thành công")
+                                else:
+                                    self.log(f"⚠️ Xóa file thất bại: {reason}")
+
+                                time.sleep(WAIT_MEDIUM)
+
+                                # ========== TẮT MÁY ẢO ==========
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                time.sleep(WAIT_MEDIUM)
+
+                                # ========== CẬP NHẬT TRẠNG THÁI ==========
+                                vid["status"] = "post"
+                                try:
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                except Exception as e:
+                                    self.log(f"⚠️ Không thể xóa {video_path}: {e}")
+
+                                self.log(f"✅ Hoàn tất {title}")
+
+                        finally:
+                            # ========== RELEASE VM LOCK ==========
+                            if vm_acquired:
+                                vm_manager.release_vm(vm_name, caller=f"Follow:{self.cfg['name']}")
+                                self.log(f"🔓 Đã giải phóng máy ảo '{vm_name}'")
+                                vm_acquired = False
+
+                    # Lưu progress
+                    with open(self.cfg["out_path"], "w", encoding="utf-8") as f:
+                        json.dump(all_videos, f, ensure_ascii=False, indent=2)
+
+
+                except Exception as e:
+                    self.log(f"⚠️ Lỗi xử lý video: {e}")
+                    logger.exception("Error processing video")
+                
+                # Cập nhật cutoff
+                try:
+                    latest_iso = max(new_rows, key=lambda x: x["publishedAt"])["publishedAt"]
+                    cutoff_dt = iso_to_datetime(latest_iso)
+                except:
+                    pass
+                #     else:
+                #         self.log("Không có video phù hợp sau khi lọc.")
+                # else:
+                #     self.log("Không có video mới.")
+                
+                # ========== ĐẾM NGƯỢC (Option 1: Check manual) ==========
+                if self.stop_event.is_set():
+                    break
+                
+                interval = int(self.cfg["interval_min"])
+                self.next_deadline = datetime.now(timezone.utc) + timedelta(minutes=interval)
+                
+                while not self.stop_event.is_set():
+                    now = datetime.now(timezone.utc)
+                    left = int((self.next_deadline - now).total_seconds())
+                    if left <= 0:
+                        break
+                    
+                    hh = left // 3600
+                    mm = (left % 3600) // 60
+                    ss = left % 60
+                    self.status = f"Đang chờ: {hh:02d}:{mm:02d}:{ss:02d}"
+                    ui_queue.put(("status", self.row_id, self.status))
+                    time.sleep(1)
+            
+            self.status = "Đã dừng"
+            self.log("Luồng đã dừng.")
+
+
+        except Exception as e:
+            self.status = f"Lỗi: {e}"
+            self.log(f"Lỗi không mong muốn: {e}")
+            logger.exception("Unexpected error in stream worker")
+            import traceback
+            self.log(traceback.format_exc())
+        
+        finally:
+            # ========== CLEANUP ==========
+            if self.worker_helper:
+                self.worker_helper.cleanup()
+            
+            # Tắt máy ảo nếu còn đang bật
+            try:
+                vm_name = self.cfg.get("vm_name")
+                if vm_name:
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=10
+                    )
+            except:
+                pass
+            
+            ui_queue.put(("status", self.row_id, self.status))
+
+# ========================= GIAO DIỆN =========================
+class FollowTab(ttk.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
+        self.ui_queue = queue.Queue()
+        self.streams = {}
+        self.meta = load_streams_meta()
+
+        # Giao diện chính (dùng self thay vì root window)
+        self.build_topbar()
+        self.build_table()
+        self.load_existing_streams()
+        self.after(200, self.process_ui_queue)
+
+    def append_log_line(self, row_id, line):
+        # chỉ update nếu cửa sổ log đang mở
+        if hasattr(self, "log_windows") and row_id in self.log_windows:
+            win = self.log_windows[row_id]
+            if win.winfo_exists():
+                txt = win.text_log
+
+                def safe_append():
+                    # kiểm tra widget còn tồn tại
+                    if not txt.winfo_exists():
+                        return
+                    try:
+                        txt.config(state="normal")
+                        txt.insert("end", line + "\n")
+                        txt.see("end")
+                        txt.config(state="disabled")
+                    except Exception:
+                        # tránh crash nếu widget bị đóng giữa chừng
+                        pass
+
+                # thread-safe append
+                win.after(0, safe_append)
+
+
+
+    def build_topbar(self):
+        top = ttk.Frame(self)
+        top.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        self.btn_api = ttk.Button(
+            top,
+            text="🔑 Quản lý API Keys",
+            command=self.open_api_manager,
+            bootstyle="warning",
+            width=20
+        )
+        self.btn_api.pack(side=tk.LEFT, padx=3)
+
+        ttk.Label(
+            top,
+            text="💡 Theo dõi & tự động tải video từ YouTube/TikTok",
+            font=("Segoe UI", 11, "bold"),
+            bootstyle="primary"
+        ).pack(side=tk.LEFT, padx=20)
+
+        self.btn_add = ttk.Button(
+            top,
+            text="➕ Thêm luồng mới",
+            command=self.open_add_stream_dialog,
+            bootstyle="success",
+            width=18
+        )
+        self.btn_add.pack(side=tk.RIGHT, padx=3)
+
+    def build_table(self):
+        table_container = ttk.Labelframe(self, text="📋 Danh Sách Luồng Theo Dõi", bootstyle="primary")
+        table_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+
+        frame = ttk.Frame(table_container)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        columns = ("stt", "name", "account", "watch", "interval", "status", "run", "stop", "log", "edit", "delete")
+
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=18)
+
+        # Configure alternating row colors (striped)
+        self.tree.tag_configure("oddrow", background="#f0f0f0")
+        self.tree.tag_configure("evenrow", background="white")
+        self.tree.heading("stt", text="STT")
+        self.tree.heading("name", text="Tên luồng")
+        self.tree.heading("account", text="Tài khoản")
+        self.tree.heading("watch", text="Theo dõi trang")
+        self.tree.heading("interval", text="Thời gian quét")
+        self.tree.heading("status", text="Trạng thái")
+        self.tree.heading("run", text="Chạy")
+        self.tree.heading("stop", text="Dừng")
+        self.tree.heading("log", text="Log")
+        self.tree.heading("edit", text="Sửa")
+        self.tree.heading("delete", text="Xóa")
+
+        self.tree.column("stt", width=50, anchor=tk.CENTER)
+        self.tree.column("name", width=180)
+        self.tree.column("account", width=150)
+        self.tree.column("watch", width=180, anchor=tk.CENTER)
+        self.tree.column("interval", width=120, anchor=tk.CENTER)
+        self.tree.column("status", width=260)
+        self.tree.column("run", width=60, anchor=tk.CENTER)
+        self.tree.column("stop", width=60, anchor=tk.CENTER)
+        self.tree.column("log", width=60, anchor=tk.CENTER)
+        self.tree.column("edit", width=60, anchor=tk.CENTER)
+        self.tree.column("delete", width=60, anchor=tk.CENTER)
+
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=vsb.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Click vào cột action
+        self.tree.bind("<Button-1>", self.on_tree_click)
+
+    def refresh_stt(self):
+        for idx, iid in enumerate(self.tree.get_children(), start=1):
+            self.tree.set(iid, "stt", str(idx))
+            # Apply striped row tags
+            tag = "evenrow" if idx % 2 == 0 else "oddrow"
+            self.tree.item(iid, tags=(tag,))
+
+    def load_existing_streams(self):
+        for cfg in self.meta.get("streams", []):
+            self.add_stream_row(cfg)
+
+    def add_stream_row(self, cfg: dict):
+        vm_name = cfg.get("vm_name", "")
+        account_display = cfg.get("account_display", vm_name) if vm_name else "Chưa chọn"
+
+        iid = self.tree.insert("", tk.END, values=(
+            "",  # stt sẽ set sau
+            cfg["name"],
+            account_display,
+            f"{len(cfg['channels'])} kênh",
+            f"{cfg['interval_min']} phút",
+            "Chưa chạy",
+            "▶", "■", "📝", "✎", "✖"
+        ))
+        self.refresh_stt()
+        st = Stream(cfg, iid, log_callback=self.append_log_line)
+        self.streams[iid] = st
+
+    # ---------- POPUP: API MANAGER ----------
+    def open_api_manager(self):
+        api_manager.refresh()
+
+        win = tk.Toplevel(self)
+        win.title("Quản lý API keys")
+        win.geometry("750x480")
+        win.grab_set()
+
+        frm = tk.Frame(win)
+        frm.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        tk.Label(frm, text=f"File: {API_FILE}").pack(anchor="w")
+
+        # Frame cho listbox và status
+        list_frame = tk.Frame(frm)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=6)
+
+        # Listbox hiển thị API keys
+        listbox = tk.Listbox(list_frame, height=12, font=("Courier", 9))
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        listbox.config(yscrollcommand=scrollbar.set)
+
+        # Dict lưu trạng thái check của mỗi key
+        key_status = {}
+
+        # Load keys và hiển thị
+        def load_and_display_keys():
+            listbox.delete(0, tk.END)
+            key_status.clear()
+            keys = api_manager.load_keys()
+            for i, k in enumerate(keys):
+                display_text = f"[{i+1}] {k[:20]}...{k[-10:]}" if len(k) > 35 else f"[{i+1}] {k}"
+                listbox.insert(tk.END, display_text)
+                key_status[i] = {"key": k, "status": None}
+
+        load_and_display_keys()
+
+        # Status label
+        status_label = tk.Label(frm, text="", anchor="w", justify="left", fg="blue")
+        status_label.pack(fill=tk.X, pady=(0, 6))
+
+        # Buttons frame
+        btns = tk.Frame(frm)
+        btns.pack(fill=tk.X)
+
+        def add_key():
+            k = simpledialog.askstring("Thêm API key", "Dán API key mới:", parent=win)
+            if k and k.strip():
+                current_keys = [key_status[i]["key"] for i in range(len(key_status))]
+                current_keys.append(k.strip())
+                api_manager.save_keys(current_keys)
+                load_and_display_keys()
+                status_label.config(text="✓ Đã thêm API key mới", fg="green")
+
+        def del_key():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Xóa", "Hãy chọn 1 key để xóa.", parent=win)
+                return
+            
+            idx = sel[0]
+            if messagebox.askyesno("Xác nhận xóa", f"Xóa API key #{idx+1}?", parent=win):
+                current_keys = [key_status[i]["key"] for i in range(len(key_status)) if i != idx]
+                api_manager.save_keys(current_keys)
+                load_and_display_keys()
+                status_label.config(text=f"✓ Đã xóa API key #{idx+1}", fg="green")
+
+        def check_selected_key():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Kiểm tra", "Hãy chọn 1 key để kiểm tra.", parent=win)
+                return
+            
+            idx = sel[0]
+            api_key = key_status[idx]["key"]
+            
+            status_label.config(text=f"⏳ Đang kiểm tra API key #{idx+1}...", fg="blue")
+            win.update()
+            
+            def do_check():
+                result = check_api_key_valid(api_key)
+                key_status[idx]["status"] = result
+                win.after(0, lambda: update_check_result(idx, result))
+            
+            threading.Thread(target=do_check, daemon=True).start()
+
+        def update_check_result(idx, result):
+            msg = result["message"]
+            if result["quota_remaining"] is not None:
+                msg += f" (Quota: {result['quota_remaining']})"
+            
+            color = "green" if result["valid"] else "red"
+            status_label.config(text=f"API key #{idx+1}: {msg}", fg=color)
+
+        def check_all_keys():
+            if not key_status:
+                messagebox.showinfo("Kiểm tra tất cả", "Không có API key nào để kiểm tra.", parent=win)
+                return
+            
+            status_label.config(text="⏳ Đang kiểm tra tất cả API keys...", fg="blue")
+            win.update()
+            
+            def do_check_all():
+                results = []
+                for i in range(len(key_status)):
+                    api_key = key_status[i]["key"]
+                    result = check_api_key_valid(api_key)
+                    key_status[i]["status"] = result
+                    results.append((i+1, result))
+                
+                win.after(0, lambda: show_all_results(results))
+            
+            threading.Thread(target=do_check_all, daemon=True).start()
+
+        def show_all_results(results):
+            valid_count = sum(1 for _, r in results if r["valid"])
+            invalid_count = len(results) - valid_count
+            
+            summary = f"✓ Hoàn thành: {valid_count} keys hoạt động, {invalid_count} keys lỗi"
+            status_label.config(text=summary, fg="green" if invalid_count == 0 else "orange")
+            
+            details = []
+            for idx, result in results:
+                status_icon = "✓" if result["valid"] else "✗"
+                details.append(f"Key #{idx}: {status_icon} {result['message']}")
+            
+            detail_msg = "\n".join(details)
+            
+            detail_win = tk.Toplevel(win)
+            detail_win.title("Kết quả kiểm tra API keys")
+            detail_win.geometry("600x400")
+            detail_win.grab_set()
+            
+            txt = tk.Text(detail_win, wrap="word", font=("Courier", 9))
+            txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            txt.insert("1.0", detail_msg)
+            txt.config(state="disabled")
+            
+            ttk.Button(detail_win, text="Đóng", command=detail_win.destroy).pack(pady=5)
+
+        # Row 1: Thêm, Xóa
+        btn_row1 = tk.Frame(btns)
+        btn_row1.pack(fill=tk.X, pady=2)
+        
+        ttk.Button(btn_row1, text="➕ Thêm", command=add_key).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_row1, text="🗑 Xóa", command=del_key).pack(side=tk.LEFT, padx=4)
+        
+        # Row 2: Check đơn, Check tất cả
+        btn_row2 = tk.Frame(btns)
+        btn_row2.pack(fill=tk.X, pady=2)
+        
+        ttk.Button(btn_row2, text="🔍 Kiểm tra key đã chọn", command=check_selected_key, width=22).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_row2, text="🔍 Kiểm tra tất cả", command=check_all_keys, width=18).pack(side=tk.LEFT, padx=4)
+        
+        ttk.Button(btn_row2, text="Đóng", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+    # ---------- POPUP: THÊM/SỬA LUỒNG ----------
+    def open_add_stream_dialog(self, edit_iid=None):
+        init = {
+            "name": "",
+            "start_vn": datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M"),
+            # "platform": cfg.get("platform", "youtube"),
+            "channels": "",
+            "mode": "both",
+            "interval_min": 5,
+            "vm_name": "", 
+            "account_display": ""
+            
+        }
+        editing = False
+        if edit_iid:
+            editing = True
+            cfg = self.streams[edit_iid].cfg
+            init = {
+                "name": cfg["name"],
+                "start_vn": cfg["start_vn"],
+                "platform": cfg.get("platform", "youtube"),
+                "channels": "\n".join(cfg["channels"]),
+                "mode": cfg["mode"],
+                "interval_min": cfg["interval_min"],
+                "vm_name": cfg.get("vm_name", ""),  # THÊM
+                "account_display": cfg.get("account_display", "")
+            }
+
+        win = tk.Toplevel(self)
+        win.title("Sửa luồng" if editing else "Thêm luồng")
+        win.geometry("680x620")
+        win.grab_set()
+
+        frm = tk.Frame(win)
+        frm.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Tên luồng
+        tk.Label(frm, text="Tên luồng:").pack(anchor="w")
+        ent_name = ttk.Entry(frm)
+        ent_name.insert(0, init["name"])
+        ent_name.pack(fill=tk.X, pady=4)
+
+        # === THÊM PHẦN NÀY: Chọn máy ảo ===
+        tk.Label(frm, text="Chọn tài khoản (máy ảo):").pack(anchor="w", pady=(8, 0))
+        
+        vm_list = get_vm_list_with_insta()
+        vm_displays = [vm["display"] for vm in vm_list]
+        vm_names = [vm["vm_name"] for vm in vm_list]
+        
+        combo_vm = ttk.Combobox(frm, values=vm_displays, state="readonly")
+        combo_vm.pack(fill=tk.X, pady=4)
+        
+        # Set giá trị mặc định nếu đang edit
+        if init["vm_name"] and init["vm_name"] in vm_names:
+            idx = vm_names.index(init["vm_name"])
+            combo_vm.current(idx)
+        elif vm_displays:
+            combo_vm.current(0) 
+
+        # Thời gian bắt đầu (VN)
+        tk.Label(frm, text="Thời gian bắt đầu (dd/mm/yyyy HH:MM – giờ Việt Nam):").pack(anchor="w")
+        ent_start = ttk.Entry(frm)
+        ent_start.insert(0, init["start_vn"])
+        ent_start.pack(fill=tk.X, pady=4)
+        
+        # Chọn nền tảng (YouTube / TikTok)
+        tk.Label(frm, text="Nền tảng:").pack(anchor="w")
+        platform_var = tk.StringVar(value=init.get("platform", "youtube"))
+        platform_menu = ttk.Combobox(frm, textvariable=platform_var, values=["youtube", "tiktok"], state="readonly")
+        platform_menu.pack(fill=tk.X, pady=4)
+
+        # Kênh theo dõi (nhiều kênh, mỗi dòng 1 link)
+        tk.Label(frm, text="Đường dẫn kênh (mỗi dòng 1 kênh").pack(anchor="w")
+        txt_channels = tk.Text(frm, height=10)
+        txt_channels.insert("1.0", init["channels"])
+        txt_channels.pack(fill=tk.BOTH, expand=True, pady=4)
+
+        # Radio lấy gì
+        tk.Label(frm, text="Loại video lấy:").pack(anchor="w")
+        mode_var = tk.StringVar(value=init["mode"])
+
+        rd1 = ttk.Radiobutton(frm, text="Lấy Shorts (<60s)", variable=mode_var, value="shorts")
+        rd2 = ttk.Radiobutton(frm, text="Lấy video dài (>=60s)", variable=mode_var, value="long")
+        rd3 = ttk.Radiobutton(frm, text="Lấy cả 2", variable=mode_var, value="both")
+        rd1.pack(anchor="w"); rd2.pack(anchor="w"); rd3.pack(anchor="w")
+
+        def on_platform_change(event=None):
+            platform = platform_var.get()
+            if platform == "tiktok":
+                # TikTok chỉ có video ngắn, nên tắt lựa chọn
+                mode_var.set("both")
+                rd1.config(state="disabled")
+                rd2.config(state="disabled")
+                rd3.config(state="disabled")
+            else:
+                # YouTube → bật lại tùy chọn
+                rd1.config(state="normal")
+                rd2.config(state="normal")
+                rd3.config(state="normal")
+
+        platform_menu.bind("<<ComboboxSelected>>", on_platform_change)
+        # Gọi 1 lần để áp dụng khi mở form
+        on_platform_change()
+
+        # Thời gian quét
+        tk.Label(frm, text="Thời gian quét (phút, 5-1440):").pack(anchor="w")
+        spn_interval = tk.Spinbox(frm, from_=5, to=1440, increment=5)
+        spn_interval.delete(0, tk.END)
+        spn_interval.insert(0, str(init["interval_min"]))
+        spn_interval.pack(anchor="w", pady=4)
+
+        btns = tk.Frame(frm)
+        btns.pack(fill=tk.X, pady=8)
+
+        def on_save():
+            name = ent_name.get().strip()
+            if not name:
+                messagebox.showerror("Lỗi", "Tên luồng không được để trống.")
+                return
+            else:
+                # kiểm tra trùng tên (nếu thêm mới hoặc đổi tên khi sửa)
+                for iid, st in self.streams.items():
+                    if st.cfg["name"] == name:
+                        if not (editing and iid == edit_iid):
+                            messagebox.showerror("Lỗi", "Tên luồng đã tồn tại. Hãy chọn tên khác.")
+                            return
+            selected_idx = combo_vm.current()
+            if selected_idx < 0:
+                messagebox.showerror("Lỗi", "Vui lòng chọn một tài khoản (máy ảo).")
+                return
+            
+            selected_vm_name = vm_names[selected_idx]
+            selected_display = vm_displays[selected_idx]
+            try:
+                _ = parse_vn_datetime(ent_start.get().strip(), VN_TZ)  # dd/mm/yyyy HH:MM (VN)
+            except Exception:
+                messagebox.showerror("Lỗi", "Thời gian bắt đầu sai định dạng. Dùng dd/mm/yyyy HH:MM (giờ VN).")
+                return
+
+            channels = [ln.strip() for ln in txt_channels.get("1.0", tk.END).splitlines() if ln.strip()]
+            if not channels:
+                messagebox.showerror("Lỗi", "Hãy nhập tối thiểu 1 kênh.")
+                return
+
+            mode = mode_var.get()
+            if mode not in ("shorts", "long", "both"):
+                messagebox.showerror("Lỗi", "Hãy chọn 1 trong 3 chế độ lấy video.")
+                return
+
+            try:
+                iv = int(spn_interval.get())
+                if iv < 5 or iv > 1440:
+                    raise ValueError
+            except Exception:
+                messagebox.showerror("Lỗi", "Thời gian quét phải từ 5 đến 1440 phút.")
+                return
+
+            # Tạo cấu hình cơ sở
+            slug = slugify(name)
+            out_path = os.path.join(OUTPUT_DIR, f"{slug}.json")
+            cfg = {
+                "id": slug,
+                "name": name,
+                "vm_name": selected_vm_name,  # THÊM
+                "account_display": selected_display, 
+                "start_vn": ent_start.get().strip(),
+                "platform": platform_var.get(),
+                "channels": channels,
+                "mode": mode,
+                "interval_min": iv,
+                "out_path": out_path
+            }
+
+            meta = load_streams_meta()
+
+            if editing:
+                # --- SỬA LUỒNG ---
+                if self.streams[edit_iid].is_running():
+                    messagebox.showwarning("Đang chạy", "Hãy dừng luồng trước khi sửa.")
+                    return
+
+                old_cfg = self.streams[edit_iid].cfg
+                old_out = old_cfg["out_path"]       # giữ nguyên file cũ
+
+                # cập nhật cfg nhưng giữ id & out_path cũ
+                cfg = {
+                    "id": old_cfg["id"],            # GIỮ ID cũ để không nhân bản dòng trong streams.json
+                    "name": name,
+                    "vm_name": selected_vm_name,  # THÊM
+                    "account_display": selected_display,
+                    "start_vn": ent_start.get().strip(),
+                    "platform": platform_var.get(),
+                    "channels": channels,
+                    "mode": mode,
+                    "interval_min": iv,
+                    "out_path": old_out
+                }
+
+                # xóa dữ liệu cũ để không lẫn (và tạo file rỗng)
+                reset_output_file(old_out)
+
+                # cập nhật stream & UI
+                self.streams[edit_iid].cfg = cfg
+                self.tree.set(edit_iid, "name", cfg["name"])
+                self.tree.set(edit_iid, "account", selected_display)
+                self.tree.set(edit_iid, "watch", f"{len(cfg['channels'])} kênh")
+                self.tree.set(edit_iid, "interval", f"{cfg['interval_min']} phút")
+                self.tree.set(edit_iid, "status", "Chưa chạy")
+
+                # ghi meta theo id cũ
+                replaced = False
+                for i, old in enumerate(meta["streams"]):
+                    if old["id"] == old_cfg["id"]:
+                        meta["streams"][i] = cfg
+                        replaced = True
+                        break
+                if not replaced:
+                    meta["streams"].append(cfg)
+                save_streams_meta(meta)
+
+                messagebox.showinfo("OK", "Đã lưu & làm mới dữ liệu luồng (đã xoá file cũ).")
+                win.destroy()
+                return
+
+            else:
+                # --- THÊM LUỒNG MỚI ---
+                # tạo file rỗng ngay để thấy kết quả
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump([], f, ensure_ascii=False, indent=2)
+
+                # ghi meta (ghi đè theo id nếu trùng)
+                found = False
+                for i, s in enumerate(meta["streams"]):
+                    if s["id"] == cfg["id"]:
+                        meta["streams"][i] = cfg
+                        found = True
+                        break
+                if not found:
+                    meta["streams"].append(cfg)
+                save_streams_meta(meta)
+
+                # thêm dòng vào bảng
+                self.add_stream_row(cfg)
+
+                messagebox.showinfo("OK", "Đã thêm luồng.")
+                win.destroy()
+                return
+
+        def on_save_wrapper():
+            try:
+                on_save()
+            except Exception as e:
+                show_exception_dialog("Lỗi khi lưu luồng", e)
+
+        ttk.Button(btns, text="💾 Lưu", command=on_save_wrapper).pack(side=tk.RIGHT, padx=6)
+        ttk.Button(btns, text="Đóng", command=win.destroy).pack(side=tk.RIGHT)
+
+    # ---------- BẢNG: CLICK HÀNH ĐỘNG ----------
+    def on_tree_click(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        row_id = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)  # '#1'..'#10'
+        if not row_id or not col_id:
+            return
+
+        col = self.tree["columns"][int(col_id.strip("#")) - 1]
+        if row_id not in self.streams:
+            return
+        stream = self.streams[row_id]
+
+        if col == "run":
+            platform = stream.cfg.get("platform", "youtube")
+            if platform == "youtube" and not api_manager.has_keys():
+                messagebox.showerror("API", "Chưa có API key YouTube. Vào nút API để thêm.")
+                return
+            stream.start(self.ui_queue)
+            self.tree.set(row_id, "status", "Đang chạy...")
+        elif col == "stop":
+            stream.stop()
+        elif col == "log":
+            self.open_log_window(stream)
+        elif col == "edit":
+            self.open_add_stream_dialog(edit_iid=row_id)
+        elif col == "delete":
+            self.delete_stream(row_id)
+
+    def open_log_window(self, stream: Stream):
+        # 🟢 nếu chưa có dict log_windows thì tạo
+        if not hasattr(self, "log_windows"):
+            self.log_windows = {}
+
+        # 🟢 nếu cửa sổ log đã mở, focus lại thay vì mở mới
+        if stream.row_id in self.log_windows and self.log_windows[stream.row_id].winfo_exists():
+            self.log_windows[stream.row_id].focus()
+            return
+
+        # 🟢 tạo cửa sổ mới
+        win = tk.Toplevel(self)
+        win.title(f"Log – {stream.cfg['name']}")
+        win.geometry("800x480")
+        win.grab_set()
+
+        # 🟢 tạo text widget
+        txt = tk.Text(win, wrap="word", state="disabled")
+        txt.pack(fill=tk.BOTH, expand=True)
+
+        # 🟢 hiển thị sẵn log cũ (nếu có)
+        if stream.logs:
+            txt.config(state="normal")
+            txt.insert("1.0", "\n".join(stream.logs))
+            txt.see("end")
+            txt.config(state="disabled")
+
+        # 🟢 lưu để callback append_log_line có thể truy cập
+        win.text_log = txt
+        self.log_windows[stream.row_id] = win
+
+        # 🟢 thêm nút Xóa và Đóng (tùy chọn)
+        btns = tk.Frame(win)
+        btns.pack(fill=tk.X, pady=5)
+
+        def clear_logs():
+            stream.logs.clear()
+            txt.config(state="normal")
+            txt.delete("1.0", tk.END)
+            txt.config(state="disabled")
+
+        ttk.Button(btns, text="Xóa lịch sử", command=clear_logs).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Đóng", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+
+    def delete_stream(self, row_id: str):
+        s = self.streams[row_id]
+        if s.is_running():
+            if not messagebox.askyesno("Xóa", "Luồng đang chạy. Dừng và xóa?"):
+                return
+            s.stop()
+            time.sleep(0.3)
+        # xóa khỏi meta
+        meta = load_streams_meta()
+        meta["streams"] = [x for x in meta["streams"] if x["id"] != s.cfg["id"]]
+        save_streams_meta(meta)
+        # xóa khỏi UI
+        self.tree.delete(row_id)
+        del self.streams[row_id]
+        self.refresh_stt()
+        # hỏi xóa file kết quả
+        if os.path.exists(s.cfg["out_path"]):
+            if messagebox.askyesno("Xóa file", "Xóa luôn file kết quả của luồng?"):
+                try:
+                    os.remove(s.cfg["out_path"])
+                except Exception:
+                    pass
+
+    # ---------- QUEUE CẬP NHẬT UI TỪ THREAD ----------
+    def process_ui_queue(self):
+        try:
+            while True:
+                msg = self.ui_queue.get_nowait()
+                kind = msg[0]
+                if kind == "status":
+                    _, row_id, status = msg
+                    if row_id in self.streams:
+                        self.tree.set(row_id, "status", status)
+        except queue.Empty:
+            pass
+        self.after(200, self.process_ui_queue)

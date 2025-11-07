@@ -1,0 +1,16 @@
+# Instagram Automation Tool Dependencies
+
+# UIAutomator2 for Android automation
+uiautomator2>=2.16.0
+
+# YouTube/TikTok video downloader
+yt-dlp>=2023.10.0
+
+# HTTP requests (for 2FA API, YouTube API)
+requests>=2.31.0
+
+# Google API client for YouTube Data API
+google-api-python-client>=2.100.0
+
+# Modern UI theme for Tkinter
+ttkbootstrap>=1.10.1
