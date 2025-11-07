@@ -13,7 +13,7 @@ class App(ttk.Window):
         super().__init__(themename="cosmo")
 
         self.title("Instagram Automation Tool")
-        self.geometry("1500x850")
+        self.geometry("1500x1000")
 
         # Set window icon if available
         # self.iconbitmap("assets/logo.ico")

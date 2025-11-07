@@ -11,6 +11,9 @@ import shutil
 from datetime import datetime
 import time
 
+# GitHub repository URL
+GITHUB_REPO_URL = "https://github.com/Hien-NguyenVan/Auto_Post_Instagram.git"
+
 
 class Updater:
     def __init__(self):
@@ -23,6 +26,7 @@ class Updater:
         self.git_dir = os.path.join(self.app_dir, ".git")
         self.backup_dir = os.path.join(self.app_dir, "backups")
         self.version_file = os.path.join(self.app_dir, "version.txt")
+        self.repo_url = GITHUB_REPO_URL
 
     def print_header(self):
         """Print update tool header"""
@@ -31,20 +35,98 @@ class Updater:
         print("=" * 60)
         print()
 
-    def check_git_repo(self):
-        """Check if current directory is a git repository"""
-        if not os.path.exists(self.git_dir):
-            print("❌ Lỗi: Không tìm thấy Git repository!")
-            print("   Vui lòng clone project từ GitHub trước.")
+    def setup_git_repo(self):
+        """Automatically setup git repository if not exists"""
+        try:
+            # Check if .git exists
+            if not os.path.exists(self.git_dir):
+                print("⚙️  Chưa có Git repository, đang tự động setup...")
+                print()
+
+                # Git init
+                print("   [1/3] Khởi tạo Git repository...")
+                result = subprocess.run(
+                    ["git", "init"],
+                    cwd=self.app_dir,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode != 0:
+                    print(f"   ❌ Lỗi: {result.stderr}")
+                    return False
+                print("   ✅ Git init thành công")
+
+            # Check if remote exists
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=self.app_dir,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                # Add remote
+                print("   [2/3] Thêm GitHub remote...")
+                result = subprocess.run(
+                    ["git", "remote", "add", "origin", self.repo_url],
+                    cwd=self.app_dir,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode != 0:
+                    print(f"   ❌ Lỗi: {result.stderr}")
+                    return False
+                print(f"   ✅ Đã thêm remote: {self.repo_url}")
+            else:
+                print("   ✅ Git remote đã có sẵn")
+
+            # Initial pull if no commits
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.app_dir,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                # No commits yet, do initial pull
+                print("   [3/3] Đang tải code từ GitHub lần đầu...")
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd=self.app_dir,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode != 0:
+                    # Try without --rebase if fails
+                    result = subprocess.run(
+                        ["git", "pull", "origin", "main", "--allow-unrelated-histories"],
+                        cwd=self.app_dir,
+                        capture_output=True,
+                        text=True
+                    )
+
+                if result.returncode == 0:
+                    print("   ✅ Tải code thành công")
+                else:
+                    print(f"   ⚠️  Warning: {result.stderr}")
+                    print("   Tiếp tục với code hiện tại...")
+
             print()
-            print("   Hướng dẫn:")
-            print("   1. Mở Command Prompt")
-            print("   2. cd đến thư mục chứa tool")
-            print("   3. Chạy: git init")
-            print("   4. Chạy: git remote add origin <URL_GITHUB_REPO>")
-            print("   5. Chạy: git pull origin main")
+            print("✅ Git repository đã sẵn sàng!")
+            print()
+            return True
+
+        except Exception as e:
+            print(f"❌ Lỗi khi setup Git: {e}")
             return False
-        return True
+
+    def check_git_repo(self):
+        """Check and setup git repository if needed"""
+        return self.setup_git_repo()
 
     def check_git_installed(self):
         """Check if git command is available"""
