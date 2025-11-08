@@ -11,6 +11,12 @@ import shutil
 from datetime import datetime
 import time
 
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'ignore')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'ignore')
+
 # GitHub repository URL
 GITHUB_REPO_URL = "https://github.com/Hien-NguyenVan/Auto_Post_Instagram.git"
 
