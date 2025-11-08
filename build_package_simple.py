@@ -151,11 +151,14 @@ class SimplePackageBuilder:
             os.makedirs(dir_path, exist_ok=True)
 
         # Create placeholder file in data/api
-        api_placeholder = os.path.join(self.package_dir, "data", "api", "youtube.txt")
+        api_placeholder = os.path.join(self.package_dir, "data", "api", "apis.json")
+        import json
+        api_template = {
+            "youtube": [],
+            "tiktok": []
+        }
         with open(api_placeholder, "w", encoding="utf-8") as f:
-            f.write("# Paste your YouTube API keys here, one per line\n")
-            f.write("# Example:\n")
-            f.write("# AIzaSy...\n")
+            json.dump(api_template, f, ensure_ascii=False, indent=2)
 
         print("[OK] Package structure created")
         return True
@@ -200,9 +203,10 @@ FIRST TIME SETUP
       - Open Command Prompt in this folder
       - Run: pip install -r requirements.txt
 
-4. Configure YouTube API (optional):
-   - Open file: data/api/youtube.txt
-   - Paste your API key (one per line)
+4. Configure API Keys (optional):
+   - Use the "🔑 Quản lý API" button in the application
+   - Or manually edit: data/api/apis.json
+   - Add YouTube and TikTok API keys as needed
 
 5. Configure LDPlayer path (if needed):
    - Tool will auto-detect LDPlayer

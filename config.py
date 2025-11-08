@@ -113,8 +113,8 @@ USER_DATA_DIR = DATA_DIR
 # Output directory for stream results
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 
-# API configuration file
-API_FILE = os.path.join(DATA_DIR, "api", "youtube.txt")
+# API configuration file (DEPRECATED: Now using data/api/apis.json via multi_api_manager)
+# API_FILE = os.path.join(DATA_DIR, "api", "youtube.txt")
 
 # Streams metadata file
 STREAMS_META = os.path.join(OUTPUT_DIR, "streams.json")

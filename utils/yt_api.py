@@ -59,57 +59,79 @@ class APIKeyManager:
 
     
 # ========================= GỌI YOUTUBE API =========================
-def call_youtube_api(path: str, params: dict, api_key_manager: APIKeyManager, retry_all_keys: bool = True):
+def call_youtube_api(path: str, params: dict, api_key_manager, retry_all_keys: bool = True):
     """
     Gọi YouTube Data API v3 với cơ chế retry khi gặp lỗi quota/403/400
-    
+
     Args:
         path: Endpoint path (vd: "channels", "playlistItems", "videos")
         params: Query parameters
-        api_key_manager: Đối tượng quản lý API keys
+        api_key_manager: Đối tượng quản lý API keys (APIKeyManager hoặc MultiAPIManager)
         retry_all_keys: Nếu True, thử hết tất cả keys khi gặp lỗi
-    
+
     Returns:
         JSON response từ API
-    
+
     Raises:
         RuntimeError: Khi tất cả keys đều thất bại
     """
     last_error = None
-    keys = api_key_manager.keys or []
+
+    # Duck typing: Hỗ trợ cả APIKeyManager và MultiAPIManager
+    if hasattr(api_key_manager, 'get_keys'):
+        # MultiAPIManager
+        keys = api_key_manager.get_keys("youtube") or []
+    else:
+        # APIKeyManager (backward compatible)
+        keys = api_key_manager.keys or []
+
     max_tries = len(keys) if retry_all_keys else 1
-    
+
     for i in range(max(1, max_tries)):
-        api_key = api_key_manager.next_key()
+        # Lấy API key tùy theo loại manager
+        if hasattr(api_key_manager, 'get_next_youtube_key'):
+            # MultiAPIManager
+            api_key = api_key_manager.get_next_youtube_key()
+        else:
+            # APIKeyManager (backward compatible)
+            api_key = api_key_manager.next_key()
+
+        if not api_key:
+            raise RuntimeError("Chưa có API key. Hãy thêm trong nút API.")
+
         request_params = dict(params or {})
         request_params["key"] = api_key
-        
+
         try:
             response = SESSION.get(
                 f"{BASE_URL}/{path}",
                 params=request_params,
                 timeout=20
             )
-            
+
             if response.status_code == 200:
                 return response.json()
-            
+
             # Lỗi 4xx (quota/forbidden) -> thử key khác
             last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-            
+
         except Exception as e:
             last_error = str(e)
-    
+
     raise RuntimeError(f"Lỗi gọi YouTube API: {last_error or 'Không rõ'}")
 
 
 # ========================= XỬ LÝ CHANNEL =========================
-def extract_channel_id(url: str, api_key_manager: APIKeyManager) -> str:
+def extract_channel_id(url: str, api_key_manager) -> str:
     """
     Trích xuất Channel ID từ URL YouTube
     Hỗ trợ:
     - /channel/UCxxxx
     - /@handle (có dấu .)
+
+    Args:
+        url: URL của kênh YouTube
+        api_key_manager: Đối tượng quản lý API keys (APIKeyManager hoặc MultiAPIManager)
     """
     # Dạng /channel/UCxxxx
     match = re.search(r"youtube\.com/channel/([a-zA-Z0-9_-]+)", url)
@@ -133,17 +155,17 @@ def extract_channel_id(url: str, api_key_manager: APIKeyManager) -> str:
 
 
 
-def get_uploads_playlist_id(channel_id: str, api_key_manager: APIKeyManager) -> str:
+def get_uploads_playlist_id(channel_id: str, api_key_manager) -> str:
     """
     Lấy Playlist ID của uploads từ Channel ID
-    
+
     Args:
         channel_id: ID của kênh
-        api_key_manager: Đối tượng quản lý API keys
-    
+        api_key_manager: Đối tượng quản lý API keys (APIKeyManager hoặc MultiAPIManager)
+
     Returns:
         Playlist ID của uploads (UUxxxx...)
-    
+
     Raises:
         RuntimeError: Khi không tìm thấy kênh
     """
@@ -162,17 +184,17 @@ def get_uploads_playlist_id(channel_id: str, api_key_manager: APIKeyManager) -> 
 def iter_playlist_videos_newer_than(
     playlist_id: str,
     cutoff_time: datetime,
-    api_key_manager: APIKeyManager
+    api_key_manager
 ):
     """
     Duyệt playlist và yield các video có publishedAt > cutoff_time
     Duyệt từ mới nhất về cũ, dừng khi gặp video cũ hơn cutoff_time
-    
+
     Args:
         playlist_id: ID của playlist (uploads playlist)
         cutoff_time: Mốc thời gian (UTC) để lọc
-        api_key_manager: Đối tượng quản lý API keys
-    
+        api_key_manager: Đối tượng quản lý API keys (APIKeyManager hoặc MultiAPIManager)
+
     Yields:
         tuple: (video_id, published_at_iso_string)
     """
@@ -209,14 +231,14 @@ def iter_playlist_videos_newer_than(
             break
 
 
-def fetch_video_details(video_ids: list, api_key_manager: APIKeyManager) -> list:
+def fetch_video_details(video_ids: list, api_key_manager) -> list:
     """
     Lấy thông tin chi tiết của các video
-    
+
     Args:
         video_ids: Danh sách video IDs
-        api_key_manager: Đối tượng quản lý API keys
-    
+        api_key_manager: Đối tượng quản lý API keys (APIKeyManager hoặc MultiAPIManager)
+
     Returns:
         List of dict với các trường: title, publishedAt, duration, url
     """

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 YouTube Multi-Stream Watcher GUI
-- Nút API: quản lý list API key từ E:\tool_ld\data\api\youtube.txt (thêm/xóa/lưu)
+- Nút API: quản lý list API key từ E:\tool_ld\data\api\apis.json (YouTube & TikTok)
 - Nút "Thêm luồng" (góc trên bên phải)
 - Bảng liệt kê luồng: STT, Tên luồng, Theo dõi trang, Thời gian quét, Trạng thái, Chạy, Dừng, Log, Sửa, Xóa
 - Mỗi luồng chạy độc lập & đồng thời (thread)
@@ -142,7 +142,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 USER_DATA_DIR = os.path.join(os.getcwd(), "data")
 
 from utils.yt_api import (
-    APIKeyManager,
     extract_channel_id,
     get_uploads_playlist_id,
     iter_playlist_videos_newer_than,
@@ -181,7 +180,6 @@ def show_exception_dialog(title: str, err: Exception):
     messagebox.showerror(title, f"{err}\n\n{tb}")
 
 # ========================= CẤU HÌNH ĐƯỜNG DẪN =========================
-API_FILE = os.path.join(os.getcwd(), "data", "api", "youtube.txt")
 OUTPUT_DIR = "data/output"
 STREAMS_META = os.path.join(OUTPUT_DIR, "streams.json")
 
@@ -189,15 +187,8 @@ STREAMS_META = os.path.join(OUTPUT_DIR, "streams.json")
 VN_TZ = timezone(timedelta(hours=7))  # Asia/Ho_Chi_Minh (UTC+7)
 LOCK = threading.Lock()  # khóa chung cho trạng thái chia sẻ
 
-# Khởi tạo API Key Manager
-api_manager = APIKeyManager(API_FILE)
-
 def ensure_dirs():
-    os.makedirs(os.path.dirname(API_FILE), exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    if not os.path.exists(API_FILE):
-        with open(API_FILE, "w", encoding="utf-8") as f:
-            f.write("")  # file rỗng ban đầu
     if not os.path.exists(STREAMS_META):
         with open(STREAMS_META, "w", encoding="utf-8") as f:
             json.dump({"streams": []}, f, ensure_ascii=False, indent=2)
@@ -347,13 +338,13 @@ class Stream:
                         if self.stop_event.is_set():
                             self.log("🛑 Dừng quét kênh")
                             break
-                        
+
                         try:
-                            cid = extract_channel_id(ch_url, api_manager)
-                            pid = get_uploads_playlist_id(cid, api_manager)
-                            
+                            cid = extract_channel_id(ch_url, multi_api_manager)
+                            pid = get_uploads_playlist_id(cid, multi_api_manager)
+
                             ids = []
-                            for vid, pub in iter_playlist_videos_newer_than(pid, cutoff_dt, api_manager):
+                            for vid, pub in iter_playlist_videos_newer_than(pid, cutoff_dt, multi_api_manager):
                                 if self.stop_event.is_set():
                                     break
                                 ids.append(vid)
@@ -382,7 +373,7 @@ class Stream:
 
                 if self.cfg.get("platform", "youtube") == "youtube":
                     if all_new_ids:
-                        details = fetch_video_details(all_new_ids, api_manager)
+                        details = fetch_video_details(all_new_ids, multi_api_manager)
                         for r in details:
                             if iso_to_datetime(r["publishedAt"]) <= cutoff_dt:
                                 continue
@@ -1409,7 +1400,7 @@ class FollowTab(ttk.Frame):
 
         if col == "run":
             platform = stream.cfg.get("platform", "youtube")
-            if platform == "youtube" and not api_manager.has_keys():
+            if platform == "youtube" and len(multi_api_manager.get_keys("youtube")) == 0:
                 messagebox.showerror("API", "Chưa có API key YouTube. Vào nút API để thêm.")
                 return
             stream.start(self.ui_queue)
