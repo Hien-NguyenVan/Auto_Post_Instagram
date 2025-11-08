@@ -35,7 +35,7 @@ class VMManager:
             self.logger = logging.getLogger(__name__)
             self._initialized = True
 
-    def acquire_vm(self, vm_name: str, timeout: float = 600, caller: str = "") -> bool:
+    def acquire_vm(self, vm_name: str, timeout: float = 5400, caller: str = "") -> bool:
         """
         Khóa máy ảo để sử dụng độc quyền.
 
@@ -45,7 +45,7 @@ class VMManager:
 
         Args:
             vm_name: Tên máy ảo cần khóa
-            timeout: Thời gian chờ tối đa (giây). Mặc định 600s = 10 phút
+            timeout: Thời gian chờ tối đa (giây). Mặc định 5400s = 1.5 giờ
             caller: Tên người gọi (để log)
 
         Returns:

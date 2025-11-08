@@ -42,7 +42,7 @@ class UsersTab(ttk.Frame):
 
         cols = ("check","stt","vm","insta","user","pass","tfa","port","status","log","toggle","login","delete")
 
-        self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=18)
+        self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=10)
 
         # Configure alternating row colors (striped)
         self.tree.tag_configure("oddrow", background="#f0f0f0")
@@ -115,6 +115,14 @@ class UsersTab(ttk.Frame):
             text="📦 Cài ứng dụng",
             command=self.install_app_to_selected,
             bootstyle="primary",
+            width=18
+        ).pack(side="left", padx=3)
+
+        ttk.Button(
+            btn_frame,
+            text="📋 Copy máy ảo",
+            command=self.copy_vm,
+            bootstyle="info",
             width=18
         ).pack(side="left", padx=3)
 
@@ -496,6 +504,200 @@ class UsersTab(ttk.Frame):
 
         self.refresh_list()
 
+    # ======= Hàm copy máy ảo =======
+    def copy_vm(self):
+        """Copy máy ảo từ VM nguồn với cấu hình giống hệt"""
+
+        # Lấy danh sách VM hiện có
+        vm_list = []
+        for file in os.listdir(DATA_DIR):
+            if file.endswith(".json"):
+                vm_name = file[:-5]  # Bỏ .json
+                vm_list.append(vm_name)
+
+        if not vm_list:
+            messagebox.showwarning("Copy máy ảo", "Không có máy ảo nào để copy!")
+            return
+
+        # Tạo dialog chọn VM nguồn và nhập tên mới
+        dialog = tk.Toplevel(self)
+        dialog.title("Copy máy ảo")
+        dialog.geometry("450x200")
+        dialog.grab_set()
+
+        # Frame chính
+        main_frame = ttk.Frame(dialog, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Chọn VM nguồn
+        ttk.Label(main_frame, text="Chọn máy ảo để copy:", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
+
+        source_var = tk.StringVar()
+        source_combo = ttk.Combobox(main_frame, textvariable=source_var, values=vm_list, state="readonly", width=40)
+        source_combo.pack(fill=tk.X, pady=(0, 15))
+        if vm_list:
+            source_combo.current(0)
+
+        # Nhập tên VM mới
+        ttk.Label(main_frame, text="Tên máy ảo mới:", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
+
+        new_name_var = tk.StringVar()
+        new_name_entry = ttk.Entry(main_frame, textvariable=new_name_var, width=42)
+        new_name_entry.pack(fill=tk.X, pady=(0, 20))
+        new_name_entry.focus()
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X)
+
+        def do_copy():
+            source_vm = source_var.get()
+            new_vm = new_name_var.get().strip()
+
+            if not source_vm:
+                messagebox.showwarning("Lỗi", "Vui lòng chọn máy ảo nguồn!", parent=dialog)
+                return
+
+            if not new_vm:
+                messagebox.showwarning("Lỗi", "Vui lòng nhập tên máy ảo mới!", parent=dialog)
+                return
+
+            # Kiểm tra tên trùng
+            new_path = os.path.join(DATA_DIR, f"{new_vm}.json")
+            if os.path.exists(new_path):
+                messagebox.showerror("Lỗi", f"Máy ảo '{new_vm}' đã tồn tại!", parent=dialog)
+                return
+
+            dialog.destroy()
+
+            # Thực hiện copy
+            try:
+                self.write_log(new_vm, f"🔄 Bắt đầu copy từ '{source_vm}'...")
+
+                # Kiểm tra VM mới đã tồn tại trong LDPlayer chưa
+                list_result = subprocess.run(
+                    [LDCONSOLE_EXE, "list2"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                for line in list_result.stdout.splitlines():
+                    parts = line.split(",")
+                    if len(parts) >= 2 and parts[1].strip() == new_vm:
+                        self.write_log(new_vm, f"❌ Máy ảo '{new_vm}' đã tồn tại trong LDPlayer!")
+                        messagebox.showerror("Lỗi", f"Máy ảo '{new_vm}' đã tồn tại trong LDPlayer.\nVui lòng xóa hoặc chọn tên khác!")
+                        return
+
+                # Kiểm tra VM nguồn có tồn tại không
+                vm_exists = False
+                for line in list_result.stdout.splitlines():
+                    parts = line.split(",")
+                    if len(parts) >= 2 and parts[1].strip() == source_vm:
+                        vm_exists = True
+                        break
+
+                if not vm_exists:
+                    self.write_log(new_vm, f"❌ Không tìm thấy máy ảo '{source_vm}' trong LDPlayer!")
+                    messagebox.showerror("Lỗi", f"Không tìm thấy máy ảo '{source_vm}' trong LDPlayer!")
+                    return
+
+                # Kiểm tra VM nguồn có đang chạy không
+                check_result = subprocess.run(
+                    [LDCONSOLE_EXE, "isrunning", "--name", source_vm],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                # isrunning trả về "running" nếu đang chạy
+                if "running" in check_result.stdout.lower():
+                    self.write_log(new_vm, f"⚠️ Máy ảo '{source_vm}' đang chạy, tắt trước khi copy...")
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "quit", "--name", source_vm],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=30
+                    )
+                    time.sleep(5)  # Đợi VM tắt hoàn toàn
+
+                # Sử dụng ldconsole copy
+                cmd = [LDCONSOLE_EXE, "copy", "--name", new_vm, "--from", source_vm]
+                self.logger.info(f"Executing: {' '.join(cmd)}")
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='ignore',
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=120  # Tăng timeout lên 2 phút
+                )
+
+                self.logger.info(f"Return code: {result.returncode}")
+                self.logger.info(f"Stdout: {result.stdout}")
+                self.logger.info(f"Stderr: {result.stderr}")
+
+                if result.returncode != 0:
+                    error_msg = f"Lỗi khi copy máy ảo:\n\n"
+                    error_msg += f"Return code: {result.returncode}\n"
+                    if result.stdout:
+                        error_msg += f"Output: {result.stdout}\n"
+                    if result.stderr:
+                        error_msg += f"Error: {result.stderr}\n"
+                    error_msg += f"\nLệnh: ldconsole copy --name {new_vm} --from {source_vm}"
+
+                    self.write_log(new_vm, f"❌ {error_msg}")
+                    messagebox.showerror("Lỗi Copy", error_msg)
+                    return
+
+                self.write_log(new_vm, f"✅ Lệnh copy thành công")
+                time.sleep(3)  # Đợi LDPlayer xử lý
+
+                # Copy data JSON từ VM nguồn
+                source_path = os.path.join(DATA_DIR, f"{source_vm}.json")
+                if os.path.exists(source_path):
+                    with open(source_path, "r", encoding="utf-8") as f:
+                        source_data = json.load(f)
+
+                    # Tạo data mới với tên VM mới
+                    new_data = source_data.copy()
+                    new_data["vm_name"] = new_vm
+                    # Reset các thông tin riêng
+                    new_data["id"] = ""  # Sẽ được update sau
+                    new_data["port"] = ""
+
+                    # Lưu data mới
+                    with open(new_path, "w", encoding="utf-8") as f:
+                        json.dump(new_data, f, ensure_ascii=False, indent=2)
+                else:
+                    # Tạo data mới rỗng nếu source không có
+                    new_data = {
+                        "id": "",
+                        "vm_name": new_vm,
+                        "insta_name": "",
+                        "username": "",
+                        "password": "",
+                        "2fa": "",
+                        "port": ""
+                    }
+                    with open(new_path, "w", encoding="utf-8") as f:
+                        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+                self.write_log(new_vm, f"✅ Copy thành công từ '{source_vm}'")
+                messagebox.showinfo("Thành công", f"Đã copy máy ảo '{source_vm}' thành '{new_vm}'")
+                self.refresh_list()
+
+            except subprocess.TimeoutExpired:
+                messagebox.showerror("Lỗi", "Timeout khi copy máy ảo!")
+            except Exception as e:
+                self.logger.exception(f"Error copying VM")
+                messagebox.showerror("Lỗi", f"Không thể copy máy ảo:\n{e}")
+
+        ttk.Button(btn_frame, text="✅ Copy", command=do_copy, bootstyle="success", width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy, bootstyle="secondary", width=15).pack(side=tk.LEFT, padx=5)
 
     # ===== Hàm bật/tắt =====
     def toggle_vm(self, name, status_label, btn_toggle):

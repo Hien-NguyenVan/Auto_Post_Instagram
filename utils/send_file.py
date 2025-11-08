@@ -14,7 +14,7 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
     """
     # ✅ fallback cho log
     log = log_callback or (lambda msg: print(msg))
-    log("test log")
+   
     try:
         # 🔹 1️⃣ Kiểm tra file tồn tại
         if not os.path.exists(local_path):
@@ -41,7 +41,8 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
         # 🔹 3️⃣ Kiểm tra kết nối ADB
         result = subprocess.run(
             [adb_path, "devices"],
-            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+            capture_output=True, text=True, encoding="utf-8", errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if device not in result.stdout:
             log(f"⚠️ Máy ảo {vm_name} (port {port}) chưa bật hoặc chưa kết nối ADB.")
@@ -54,7 +55,8 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
 
         push = subprocess.run(
             [adb_path, "-s", device, "push", local_path, remote_path],
-            text=True, encoding="utf-8", errors="ignore"
+            text=True, encoding="utf-8", errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         
         if push.returncode == 0:

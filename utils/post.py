@@ -14,7 +14,7 @@ from constants import (
     XPATH_INSTAGRAM_APP, XPATH_FEED_TAB, XPATH_PROMO_BUTTON,
     XPATH_PROFILE_TAB, XPATH_NEXT_BUTTON, XPATH_RETRY_MEDIA, XPATH_RIGHT_ACTION,
     XPATH_DOWNLOAD_NUX, XPATH_PRIMARY_ACTION, XPATH_CAPTION_INPUT,
-    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2, XPATH_CANCEL_BUTTON_ID,
+    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,
     XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,
     CONTENT_DESC_CREATE_NEW, CONTENT_DESC_CREATE_POST,
     CHROME_PACKAGE, INSTAGRAM_PACKAGE, RESOURCE_ID_LEFT_ACTION
@@ -157,19 +157,27 @@ class InstagramPost(BaseInstagramAutomation):
 
             # Click Share
             self.log(vm_name, "🔑 Nhấn Share")
-            if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT, vm_name=vm_name, timeout=3):
+            if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT, vm_name=vm_name, timeout=2):
                 self.log(vm_name, "❌ Không tìm thấy nút Share", "ERROR")
                 return False
 
+            # Click allow 
+            self.log(vm_name, "🔑 Nhấn allow")
+            self.safe_click(d, XPATH_ALLOW_2, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=2)
             # Click Share 2
             self.log(vm_name, "🔑 Nhấn Share 2")
             self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
-                          vm_name=vm_name, optional=True, timeout=5)
+                          vm_name=vm_name, optional=True, timeout=2)
             
             # Click Share 3
             self.log(vm_name, "🔑 Nhấn Share 3")
             self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
-                          vm_name=vm_name, optional=True, timeout=5)
+                          vm_name=vm_name, optional=True, timeout=2)
+            # Click allow 
+            self.log(vm_name, "🔑 Nhấn allow")
+            self.safe_click(d, XPATH_ALLOW_2, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=2)
 
             # Click "No thanks" if exists
             self.log(vm_name, "🔑 Nhấn No thanks (nếu có)")

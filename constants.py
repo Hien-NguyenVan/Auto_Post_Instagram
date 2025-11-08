@@ -64,6 +64,7 @@ RESOURCE_ID_CAPTION_INPUT = "com.instagram.android:id/caption_input_text_view"
 RESOURCE_ID_ACTION_BAR_TEXT = "com.instagram.android:id/action_bar_button_text"
 RESOURCE_ID_SHARE_BUTTON = "com.instagram.android:id/share_button"
 RESOURCE_ID_SHARE_BUTTON_2 = "com.instagram.android:id/igds_alert_dialog_primary_button"
+RESOURCE_ID_ALLOW_2 = "com.instagram.android:id/bb_primary_action_above"
 RESOURCE_ID_CANCEL_BUTTON = "com.instagram.android:id/appirater_cancel_button"
 RESOURCE_ID_PENDING_MEDIA = "com.instagram.android:id/row_pending_media_reshare_button"
 RETRY_ID_MEDIA = "com.instagram.android:id/row_pending_media_retry_button"
@@ -80,6 +81,7 @@ XPATH_CAPTION_INPUT = f'//*[@resource-id="{RESOURCE_ID_CAPTION_INPUT}"]'
 XPATH_ACTION_BAR_TEXT = f'//*[@resource-id="{RESOURCE_ID_ACTION_BAR_TEXT}"]'
 XPATH_SHARE_BUTTON = f'//*[@resource-id="{RESOURCE_ID_SHARE_BUTTON}"]'
 XPATH_SHARE_BUTTON_2 = f'//*[@resource-id="{RESOURCE_ID_SHARE_BUTTON_2}"]'
+XPATH_ALLOW_2 = f'//*[@resource-id="{RESOURCE_ID_ALLOW_2}"]'
 XPATH_CANCEL_BUTTON_ID = f'//*[@resource-id="{RESOURCE_ID_CANCEL_BUTTON}"]'
 XPATH_PENDING_MEDIA = f'//*[@resource-id="{RESOURCE_ID_PENDING_MEDIA}"]'
 XPATH_LEFT_ACTION = f'//*[@resource-id="{RESOURCE_ID_LEFT_ACTION}"]'

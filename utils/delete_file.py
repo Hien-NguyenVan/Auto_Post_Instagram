@@ -15,7 +15,8 @@ def clear_dcim(device,log_callback=None):
             text=True,
             encoding="utf-8",
             errors="ignore",
-            capture_output=True
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
 
         # Kiểm tra kết quả

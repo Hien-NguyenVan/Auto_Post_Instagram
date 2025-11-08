@@ -78,7 +78,8 @@ class YouTubeDownloader:
                     "-of", "default=noprint_wrappers=1:nokey=1",
                     video_path
                 ],
-                capture_output=True, text=True, encoding="utf-8", errors="ignore"
+                capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             codec = (probe.stdout or "").strip().lower()
             self.log(f"🎞️ Codec hiện tại: {codec or 'unknown'}")
@@ -99,6 +100,7 @@ class YouTubeDownloader:
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
 
                 try:
@@ -171,7 +173,8 @@ def download_tiktok_video(url, output_dir="temp", log_callback=None):
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video_path
             ],
-            capture_output=True, text=True, encoding="utf-8", errors="ignore"
+            capture_output=True, text=True, encoding="utf-8", errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         codec = (probe.stdout or "").strip().lower()
         log(f"🎞️ [TikTok] Codec hiện tại: {codec or 'unknown'}")
@@ -192,6 +195,7 @@ def download_tiktok_video(url, output_dir="temp", log_callback=None):
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             os.remove(video_path)
             video_path = converted
@@ -204,6 +208,94 @@ def download_tiktok_video(url, output_dir="temp", log_callback=None):
         log(f"❌ [TikTok] Lỗi tải video: {e}")
         return None
 
+
+def download_tiktok_direct_url(url, output_dir="temp", log_callback=None):
+    """
+    Download TikTok video từ direct URL (url_list[1] từ DumplingAI API)
+    Sử dụng curl thay vì yt-dlp
+    """
+    log = log_callback or (lambda msg: print(msg))
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    import uuid
+    temp_id = uuid.uuid4().hex[:8]
+    output_path = os.path.join(output_dir, f"tiktok_{temp_id}.mp4")
+
+    try:
+        log(f"📥 [TikTok Direct] Đang tải video từ URL trực tiếp...")
+
+        # Dùng curl để download
+        cmd = [
+            "curl", "-s", "-L",
+            url,
+            "-o", output_path
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='ignore',
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=120
+        )
+
+        if result.returncode != 0:
+            log(f"❌ [TikTok Direct] Lỗi curl: {result.stderr}")
+            return None
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            log(f"❌ [TikTok Direct] File tải về rỗng hoặc không tồn tại")
+            return None
+
+        # ====== Kiểm tra codec ======
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                output_path
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        codec = (probe.stdout or "").strip().lower()
+        log(f"🎞️ [TikTok Direct] Codec hiện tại: {codec or 'unknown'}")
+
+        # ====== Nếu không phải H.264 thì convert ======
+        if codec not in ("h264", "avc1"):
+            converted = os.path.join(output_dir, f"converted_tiktok_{temp_id}.mp4")
+            log(f"⚙️ [TikTok Direct] Đang chuyển mã {codec or 'unknown'} → H.264 ...")
+
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", output_path,
+                    "-c:v", "libx264", "-preset", "fast",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-movflags", "+faststart",
+                    converted,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            os.remove(output_path)
+            output_path = converted
+            log("✅ [TikTok Direct] Đã chuyển mã sang H.264 thành công.")
+
+        log(f"🏁 [TikTok Direct] Hoàn tất: {output_path}")
+        return os.path.abspath(output_path)
+
+    except subprocess.TimeoutExpired:
+        log(f"⏱️ [TikTok Direct] Timeout khi tải video")
+        return None
+    except Exception as e:
+        log(f"❌ [TikTok Direct] Lỗi tải video: {e}")
+        return None
 
 
 # ==========================================================

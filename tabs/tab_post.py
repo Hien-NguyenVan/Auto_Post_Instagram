@@ -9,6 +9,7 @@ Features:
 """
 import os
 import json
+import csv
 import time
 import queue
 import threading
@@ -21,11 +22,14 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 
 from config import LDCONSOLE_EXE, DATA_DIR
-from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT
+from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim
 from utils.vm_manager import vm_manager
+from utils.api_manager_multi import multi_api_manager
+from utils.yt_api import check_api_key_valid
+from utils.tiktok_api_new import check_tiktok_api_key_valid
 
 
 # ==================== CONSTANTS ====================
@@ -150,7 +154,7 @@ class ScheduledPost:
     """Một post được đặt lịch"""
 
     def __init__(self, post_id, video_path, scheduled_time_vn=None, vm_name=None,
-                 account_display=None, title="", status="draft", is_paused=True):
+                 account_display=None, title="", status="draft", is_paused=True, post_now=False):
         self.id = post_id
         self.video_path = video_path
         self.video_name = os.path.basename(video_path)
@@ -160,6 +164,7 @@ class ScheduledPost:
         self.title = title or self.video_name
         self.status = status  # draft, pending, processing, posted, failed
         self.is_paused = is_paused  # True = dừng, False = chạy
+        self.post_now = post_now  # True = đăng ngay khi Start
         self.stop_requested = False  # Flag để yêu cầu dừng ngay lập tức
         self.logs = []
 
@@ -173,7 +178,8 @@ class ScheduledPost:
             "account_display": self.account_display,
             "title": self.title,
             "status": self.status,
-            "is_paused": self.is_paused
+            "is_paused": self.is_paused,
+            "post_now": self.post_now
         }
 
     @staticmethod
@@ -191,7 +197,8 @@ class ScheduledPost:
             account_display=data.get("account_display"),
             title=data.get("title", ""),
             status=data.get("status", "draft"),
-            is_paused=data.get("is_paused", True)
+            is_paused=data.get("is_paused", True),
+            post_now=data.get("post_now", False)
         )
 
     def log(self, message):
@@ -377,8 +384,8 @@ class PostScheduler(threading.Thread):
 
             # ========== ACQUIRE VM LOCK ==========
             post.log(f"🔒 Chờ máy ảo '{post.vm_name}' sẵn sàng...")
-            if not vm_manager.acquire_vm(post.vm_name, timeout=600, caller=f"Post:{post.title[:20]}"):
-                post.log(f"⏱️ Timeout chờ máy ảo '{post.vm_name}' sau 10 phút")
+            if not vm_manager.acquire_vm(post.vm_name, timeout=5400, caller=f"Post:{post.title[:20]}"):
+                post.log(f"⏱️ Timeout chờ máy ảo '{post.vm_name}' sau 1.5 giờ")
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -431,7 +438,7 @@ class PostScheduler(threading.Thread):
 
             # Wait a bit more for ADB to connect
             post.log(f"⏳ Chờ ADB kết nối...")
-            time.sleep(WAIT_MEDIUM)
+            time.sleep(WAIT_LONG)
 
             # Check stop request after VM start
             if post.stop_requested:
@@ -496,7 +503,7 @@ class PostScheduler(threading.Thread):
                 [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            time.sleep(WAIT_LONG)
+            time.sleep(WAIT_EXTRA_LONG)
 
             # Check stop request after reboot
             if post.stop_requested:
@@ -654,6 +661,38 @@ class PostTab(ttk.Frame):
             width=18
         ).pack(side=tk.LEFT, padx=3)
 
+        ttk.Button(
+            top_bar,
+            text="⚙️ Đặt máy ảo hàng loạt",
+            command=self.bulk_assign_vm,
+            bootstyle="success",
+            width=20
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
+            text="📤 Xuất CSV",
+            command=self.export_to_csv,
+            bootstyle="secondary",
+            width=14
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
+            text="📥 Nhập CSV",
+            command=self.import_from_csv,
+            bootstyle="secondary",
+            width=14
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
+            text="🔑 Quản lý API",
+            command=self.open_api_manager,
+            bootstyle="warning",
+            width=16
+        ).pack(side=tk.LEFT, padx=3)
+
         ttk.Label(
             top_bar,
             text="💡 Đặt lịch đăng video tự động từ PC",
@@ -674,7 +713,7 @@ class PostTab(ttk.Frame):
             table_frame,
             columns=columns,
             show="headings",
-            height=18
+            height=10
         )
 
         # Configure alternating row colors (striped)
@@ -939,6 +978,566 @@ class PostTab(ttk.Frame):
                 f"✔️ Đã áp dụng: {applied_count} video"
             )
 
+    def bulk_assign_vm(self):
+        """Đặt máy ảo hàng loạt cho các video trong table - chỉ áp máy ảo"""
+        # Lấy tất cả video trong table
+        if not self.posts:
+            messagebox.showinfo("Thông báo", "Không có video nào trong danh sách!")
+            return
+
+        # Lấy danh sách máy ảo
+        vm_list = get_vm_list_with_insta()
+        if not vm_list:
+            messagebox.showwarning("Cảnh báo", "Không tìm thấy máy ảo nào!\n\nVui lòng thêm máy ảo trong tab 'Quản lý User'.")
+            return
+
+        # Dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Đặt máy ảo hàng loạt")
+        dialog.geometry("600x550")
+        dialog.grab_set()
+
+        # Info
+        ttk.Label(
+            dialog,
+            text=f"⚙️ Đặt máy ảo hàng loạt cho video",
+            font=("Segoe UI", 12, "bold")
+        ).pack(pady=10)
+
+        ttk.Label(
+            dialog,
+            text="(Thời gian của mỗi video sẽ được giữ nguyên)",
+            font=("Segoe UI", 9),
+            foreground="gray"
+        ).pack(pady=2)
+
+        # ========== PHẠM VI VIDEO ==========
+        range_frame = ttk.Labelframe(dialog, text="📌 Phạm vi video áp dụng", padding=10)
+        range_frame.pack(fill="x", padx=20, pady=(10, 5))
+
+        # Row: Start and End index
+        index_row = ttk.Frame(range_frame)
+        index_row.pack(fill="x", pady=5)
+
+        # Start index
+        ttk.Label(index_row, text="Từ video thứ:", width=15).pack(side="left")
+        entry_start_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
+        entry_start_index.set(1)
+        entry_start_index.pack(side="left", padx=5)
+
+        # End index
+        ttk.Label(index_row, text="Đến video thứ:", width=15).pack(side="left", padx=(20, 0))
+        entry_end_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
+        entry_end_index.set(999)
+        entry_end_index.pack(side="left", padx=5)
+
+        # Info label
+        info_label = ttk.Label(
+            range_frame,
+            text=f"💡 Tổng số video hiện tại: {len(self.posts)}",
+            font=("Segoe UI", 9),
+            foreground="#0066cc"
+        )
+        info_label.pack(anchor="w", pady=(5, 0))
+
+        # ========== CHỌN MÁY ẢO ==========
+        vm_frame = ttk.Labelframe(dialog, text="🖥️ Chọn máy ảo", padding=10)
+        vm_frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+        ttk.Label(
+            vm_frame,
+            text="Các máy ảo sẽ được áp dụng theo thứ tự (round-robin):",
+            font=("Segoe UI", 9)
+        ).pack(anchor="w", pady=(0, 5))
+
+        # Scrollable frame for VM checkboxes
+        canvas = tk.Canvas(vm_frame, height=200)
+        scrollbar = ttk.Scrollbar(vm_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Checkboxes for each VM
+        vm_vars = []
+        for vm_info in vm_list:
+            var = tk.BooleanVar(value=True)  # Default: all selected
+            vm_vars.append((vm_info, var))
+            ttk.Checkbutton(
+                scrollable_frame,
+                text=vm_info["display"],
+                variable=var,
+                bootstyle="success-round-toggle"
+            ).pack(anchor="w", padx=5, pady=2)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Select/Deselect all buttons
+        btn_select_frame = ttk.Frame(vm_frame)
+        btn_select_frame.pack(fill="x", pady=(5, 0))
+
+        def select_all():
+            for _, var in vm_vars:
+                var.set(True)
+
+        def deselect_all():
+            for _, var in vm_vars:
+                var.set(False)
+
+        ttk.Button(btn_select_frame, text="✅ Chọn tất cả", command=select_all, width=15).pack(side="left", padx=5)
+        ttk.Button(btn_select_frame, text="❌ Bỏ chọn tất cả", command=deselect_all, width=15).pack(side="left", padx=5)
+
+        result = {"ok": False}
+
+        def on_apply():
+            # Parse start and end index
+            try:
+                start_idx = int(entry_start_index.get())
+                end_idx = int(entry_end_index.get())
+
+                if start_idx < 1:
+                    messagebox.showerror("Lỗi", "Chỉ số bắt đầu phải >= 1", parent=dialog)
+                    return
+
+                if end_idx < start_idx:
+                    messagebox.showerror("Lỗi", "Chỉ số kết thúc phải >= chỉ số bắt đầu", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("Lỗi", "Chỉ số không hợp lệ", parent=dialog)
+                return
+
+            # Get selected VMs
+            selected_vms = [vm_info for vm_info, var in vm_vars if var.get()]
+            if not selected_vms:
+                messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất 1 máy ảo", parent=dialog)
+                return
+
+            # Apply VMs to posts (only within range)
+            vm_index = 0
+            applied_count = 0
+
+            for idx, post in enumerate(self.posts, start=1):
+                # Chỉ áp dụng cho video trong phạm vi
+                if idx < start_idx or idx > end_idx:
+                    continue
+
+                # Áp dụng máy ảo theo round-robin
+                vm_info = selected_vms[vm_index]
+                post.vm_name = vm_info["vm_name"]
+                post.account_display = vm_info["display"]
+
+                # Nếu đã có thời gian thì set pending, chưa thì để draft
+                if post.scheduled_time_vn:
+                    post.status = "pending"
+                    # Mặc định để paused, người dùng phải nhấn Start để chạy
+                    post.is_paused = True
+                else:
+                    post.status = "draft"
+
+                applied_count += 1
+
+                # Move to next VM
+                vm_index += 1
+                if vm_index >= len(selected_vms):
+                    vm_index = 0
+
+            result["ok"] = True
+            result["applied_count"] = applied_count
+            result["start_idx"] = start_idx
+            result["end_idx"] = min(end_idx, len(self.posts))
+            result["vm_count"] = len(selected_vms)
+            dialog.destroy()
+
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        ttk.Button(btn_frame, text="✅ Áp dụng", command=on_apply, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+
+        dialog.wait_window()
+
+        if result["ok"]:
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table()
+
+            applied_count = result.get("applied_count", 0)
+            start_idx = result.get("start_idx", 1)
+            end_idx = result.get("end_idx", len(self.posts))
+            vm_count = result.get("vm_count", 0)
+
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã đặt máy ảo thành công!\n\n"
+                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                f"✔️ Đã áp dụng: {applied_count} video\n"
+                f"🖥️ Số máy ảo: {vm_count}"
+            )
+
+    def export_to_csv(self):
+        """Xuất danh sách video ra CSV để backup"""
+        if not self.posts:
+            messagebox.showinfo("Thông báo", "Không có video nào để xuất!")
+            return
+
+        # Hỏi vị trí lưu file
+        default_name = f"backup_posts_{datetime.now(VN_TZ).strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=default_name,
+            title="Xuất danh sách video"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                # Header
+                writer.writerow(['vị_trí_file', 'thời_gian_đăng', 'máy_ảo', 'trạng_thái'])
+
+                # Data
+                for post in self.posts:
+                    time_str = post.scheduled_time_vn.strftime("%d/%m/%Y %H:%M") if post.scheduled_time_vn else ""
+                    vm_name = post.vm_name or ""
+                    status = post.status or "draft"
+
+                    writer.writerow([
+                        post.video_path,
+                        time_str,
+                        vm_name,
+                        status
+                    ])
+
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã xuất {len(self.posts)} video ra CSV!\n\n"
+                f"📁 File: {os.path.basename(file_path)}"
+            )
+
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể xuất CSV:\n{e}")
+
+    def import_from_csv(self):
+        """Nhập danh sách video từ CSV"""
+        # Confirm nếu đã có posts
+        if self.posts:
+            confirm = messagebox.askyesno(
+                "Xác nhận",
+                "⚠️ Bạn đang có video trong danh sách!\n\n"
+                "Nhập CSV sẽ THAY THẾ toàn bộ danh sách hiện tại.\n\n"
+                "Bạn có muốn tiếp tục không?"
+            )
+            if not confirm:
+                return
+
+        # Chọn file CSV
+        file_path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Chọn file CSV để nhập"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            imported_posts = []
+            errors = []
+            line_num = 0
+
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)  # Skip header
+
+                if not header:
+                    raise ValueError("File CSV rỗng!")
+
+                for row in reader:
+                    line_num += 1
+
+                    if len(row) < 4:
+                        errors.append(f"Dòng {line_num}: Thiếu cột (cần 4 cột)")
+                        continue
+
+                    video_path = row[0].strip()
+                    time_str = row[1].strip()
+                    vm_name = row[2].strip()
+                    status = row[3].strip()
+
+                    # Validate video file exists
+                    if not os.path.exists(video_path):
+                        errors.append(f"Dòng {line_num}: File không tồn tại: {video_path}")
+                        continue
+
+                    # Parse time
+                    scheduled_time = None
+                    if time_str:
+                        try:
+                            scheduled_time = datetime.strptime(time_str, "%d/%m/%Y %H:%M")
+                            scheduled_time = scheduled_time.replace(tzinfo=VN_TZ)
+                        except:
+                            errors.append(f"Dòng {line_num}: Thời gian không hợp lệ: {time_str}")
+                            continue
+
+                    # Create post
+                    post_id = f"post_{int(time.time() * 1000)}_{line_num}"
+                    post = ScheduledPost(
+                        post_id=post_id,
+                        video_path=video_path,
+                        scheduled_time_vn=scheduled_time,
+                        vm_name=vm_name if vm_name else None,
+                        account_display=None,
+                        title=os.path.basename(video_path),
+                        status=status if status else "draft",
+                        is_paused=True
+                    )
+
+                    # Set account_display from VM
+                    if post.vm_name:
+                        vm_list = get_vm_list_with_insta()
+                        for vm_info in vm_list:
+                            if vm_info["vm_name"] == post.vm_name:
+                                post.account_display = vm_info["display"]
+                                break
+
+                    imported_posts.append(post)
+
+            # Replace current posts
+            self.posts = imported_posts
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table()
+
+            # Show result
+            if errors:
+                error_msg = "\n".join(errors[:10])  # Show first 10 errors
+                if len(errors) > 10:
+                    error_msg += f"\n... và {len(errors) - 10} lỗi khác"
+
+                messagebox.showwarning(
+                    "Nhập CSV hoàn tất",
+                    f"✅ Đã nhập {len(imported_posts)} video\n"
+                    f"⚠️ Có {len(errors)} lỗi:\n\n{error_msg}"
+                )
+            else:
+                messagebox.showinfo(
+                    "Thành công",
+                    f"✅ Đã nhập {len(imported_posts)} video từ CSV!"
+                )
+
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể nhập CSV:\n{e}")
+
+    def open_api_manager(self):
+        """Mở dialog quản lý API keys cho YouTube và TikTok"""
+        multi_api_manager.refresh()
+
+        # Main dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Quản lý API Keys")
+        dialog.geometry("800x550")
+        dialog.grab_set()
+
+        # Notebook (tabs)
+        notebook = ttk.Notebook(dialog)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Tab 1: YouTube
+        youtube_frame = ttk.Frame(notebook)
+        notebook.add(youtube_frame, text="📺 YouTube API")
+        self._build_api_tab(youtube_frame, "youtube", dialog)
+
+        # Tab 2: TikTok
+        tiktok_frame = ttk.Frame(notebook)
+        notebook.add(tiktok_frame, text="🎵 TikTok API")
+        self._build_api_tab(tiktok_frame, "tiktok", dialog)
+
+        # Info label
+        info_label = ttk.Label(
+            dialog,
+            text="💡 File lưu tại: data/api/apis.json",
+            font=("Segoe UI", 9),
+            foreground="gray"
+        )
+        info_label.pack(pady=(0, 10))
+
+    def _build_api_tab(self, parent, platform, dialog):
+        """Xây dựng nội dung cho 1 tab API"""
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Listbox
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        listbox = tk.Listbox(list_frame, height=15, font=("Courier", 9))
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        listbox.config(yscrollcommand=scrollbar.set)
+
+        # Status label
+        status_label = ttk.Label(frame, text="", foreground="blue")
+        status_label.pack(fill=tk.X, pady=(0, 10))
+
+        # Load keys
+        def load_keys():
+            listbox.delete(0, tk.END)
+            keys = multi_api_manager.get_keys(platform)
+            for i, k in enumerate(keys):
+                display = f"[{i+1}] {k[:30]}...{k[-10:]}" if len(k) > 45 else f"[{i+1}] {k}"
+                listbox.insert(tk.END, display)
+            status_label.config(text=f"📊 Tổng: {len(keys)} API keys", foreground="blue")
+
+        load_keys()
+
+        # Buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X)
+
+        def add_key():
+            from tkinter import simpledialog
+            key = simpledialog.askstring(
+                f"Thêm {platform.upper()} API",
+                f"Nhập {platform.upper()} API key:",
+                parent=dialog
+            )
+            if key and key.strip():
+                if multi_api_manager.add_key(platform, key.strip()):
+                    load_keys()
+                    status_label.config(text="✅ Đã thêm API key mới", foreground="green")
+                else:
+                    status_label.config(text="⚠️ API key đã tồn tại", foreground="orange")
+
+        def remove_key():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Xóa", "Hãy chọn 1 key để xóa", parent=dialog)
+                return
+
+            idx = sel[0]
+            confirm = messagebox.askyesno(
+                "Xác nhận",
+                f"Xóa API key #{idx+1}?",
+                parent=dialog
+            )
+            if confirm:
+                if multi_api_manager.remove_key(platform, idx):
+                    load_keys()
+                    status_label.config(text=f"✅ Đã xóa API key #{idx+1}", foreground="green")
+
+        def copy_key():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Copy", "Hãy chọn 1 key để copy", parent=dialog)
+                return
+
+            idx = sel[0]
+            keys = multi_api_manager.get_keys(platform)
+            if 0 <= idx < len(keys):
+                dialog.clipboard_clear()
+                dialog.clipboard_append(keys[idx])
+                status_label.config(text=f"✅ Đã copy API key #{idx+1} vào clipboard", foreground="green")
+
+        ttk.Button(btn_frame, text="➕ Thêm", command=add_key, width=12).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame, text="🗑️ Xóa", command=remove_key, width=12).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame, text="📋 Copy", command=copy_key, width=12).pack(side=tk.LEFT, padx=3)
+
+        # Buttons Row 2: Check API
+        btn_frame2 = ttk.Frame(frame)
+        btn_frame2.pack(fill=tk.X, pady=(5, 0))
+
+        def check_selected():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Kiểm tra", "Hãy chọn 1 key để kiểm tra", parent=dialog)
+                return
+
+            idx = sel[0]
+            keys = multi_api_manager.get_keys(platform)
+            if idx >= len(keys):
+                return
+
+            api_key = keys[idx]
+            status_label.config(text=f"⏳ Đang kiểm tra API key #{idx+1}...", foreground="blue")
+            dialog.update()
+
+            def do_check():
+                if platform == "youtube":
+                    result = check_api_key_valid(api_key)
+                else:  # tiktok
+                    result = check_tiktok_api_key_valid(api_key)
+
+                dialog.after(0, lambda: show_check_result(idx, result))
+
+            threading.Thread(target=do_check, daemon=True).start()
+
+        def show_check_result(idx, result):
+            msg = result["message"]
+            if result.get("quota_remaining") is not None:
+                msg += f" (Quota: {result['quota_remaining']})"
+
+            color = "green" if result["valid"] else "red"
+            status_label.config(text=f"API key #{idx+1}: {msg}", foreground=color)
+
+        def check_all():
+            keys = multi_api_manager.get_keys(platform)
+            if not keys:
+                messagebox.showinfo("Kiểm tra tất cả", "Không có API key nào để kiểm tra", parent=dialog)
+                return
+
+            status_label.config(text="⏳ Đang kiểm tra tất cả API keys...", foreground="blue")
+            dialog.update()
+
+            def do_check_all():
+                results = []
+                for i, api_key in enumerate(keys):
+                    if platform == "youtube":
+                        result = check_api_key_valid(api_key)
+                    else:  # tiktok
+                        result = check_tiktok_api_key_valid(api_key)
+                    results.append((i+1, result))
+
+                dialog.after(0, lambda: show_all_results(results))
+
+            threading.Thread(target=do_check_all, daemon=True).start()
+
+        def show_all_results(results):
+            valid_count = sum(1 for _, r in results if r["valid"])
+            invalid_count = len(results) - valid_count
+
+            summary = f"✓ Hoàn thành: {valid_count} keys hoạt động, {invalid_count} keys lỗi"
+            status_label.config(text=summary, foreground="green" if invalid_count == 0 else "orange")
+
+            details = []
+            for idx, result in results:
+                status_icon = "✓" if result["valid"] else "✗"
+                details.append(f"Key #{idx}: {status_icon} {result['message']}")
+
+            detail_msg = "\n".join(details)
+
+            detail_win = tk.Toplevel(dialog)
+            detail_win.title("Kết quả kiểm tra API keys")
+            detail_win.geometry("600x400")
+            detail_win.grab_set()
+
+            txt = tk.Text(detail_win, wrap="word", font=("Courier", 9))
+            txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            txt.insert("1.0", detail_msg)
+            txt.config(state="disabled")
+
+            ttk.Button(detail_win, text="Đóng", command=detail_win.destroy).pack(pady=5)
+
+        ttk.Button(btn_frame2, text="🔍 Kiểm tra key đã chọn", command=check_selected, width=22).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame2, text="🔍 Kiểm tra tất cả", command=check_all, width=18).pack(side=tk.LEFT, padx=3)
+
     def add_posts_from_files(self, files):
         """Add multiple posts from file list - thêm vào table trước, click vào để config"""
         # Thêm tất cả video vào table với status "draft"
@@ -988,7 +1587,13 @@ class PostTab(ttk.Frame):
                 "failed": "❌ Thất bại"
             }.get(post.status, post.status)
 
-            scheduled_time_display = post.scheduled_time_vn.strftime("%d/%m/%Y %H:%M") if post.scheduled_time_vn else "Chưa đặt"
+            # Hiển thị thời gian
+            if post.post_now:
+                scheduled_time_display = "⚡ Đăng ngay"
+            elif post.scheduled_time_vn:
+                scheduled_time_display = post.scheduled_time_vn.strftime("%d/%m/%Y %H:%M")
+            else:
+                scheduled_time_display = "Chưa đặt"
 
             # Xác định nút Start/Stop
             if post.status == "posted":
@@ -1009,7 +1614,7 @@ class PostTab(ttk.Frame):
                 iid=post.id,
                 values=(
                     idx,
-                    post.video_name,
+                    post.title,  # Hiển thị title thay vì video_name
                     "⚙️",
                     scheduled_time_display,
                     post.account_display,
@@ -1070,29 +1675,55 @@ class PostTab(ttk.Frame):
             confirm = messagebox.askyesno(
                 "Xác nhận dừng",
                 f"⚠️ Post đang trong quá trình đăng!\n\n"
-                f"Video: {post.video_name}\n\n"
+                f"Video: {post.title}\n\n"
                 f"Bạn có chắc muốn dừng ngay lập tức?\n"
                 f"(Máy ảo sẽ được tắt)"
             )
             if confirm:
                 post.stop_requested = True
                 post.log("🛑 Người dùng yêu cầu dừng ngay lập tức")
-                messagebox.showinfo("Đã yêu cầu dừng", "Đang dừng post và tắt máy ảo...")
+
+                # Tắt máy ảo ngay lập tức để force stop
+                try:
+                    post.log("🔌 Đang tắt máy ảo...")
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=10
+                    )
+                    post.status = "failed"
+                    post.is_paused = True
+
+                    # Release VM lock if held
+                    vm_manager.release_vm(post.vm_name, caller=f"Stop:{post.title[:20]}")
+
+                    save_scheduled_posts(self.posts)
+                    self.load_posts_to_table()
+                    messagebox.showinfo("Đã dừng", "Đã dừng và tắt máy ảo thành công!")
+                except Exception as e:
+                    post.log(f"❌ Lỗi khi tắt VM: {e}")
+                    messagebox.showerror("Lỗi", f"Không thể tắt máy ảo: {e}")
             return
 
-        # Nếu đang dừng và muốn chạy → kiểm tra thời gian
+        # Nếu đang dừng và muốn chạy
         if post.is_paused:
-            # Kiểm tra thời gian phải là tương lai
-            now = datetime.now(VN_TZ)
-            if post.scheduled_time_vn <= now:
-                messagebox.showerror(
-                    "Lỗi",
-                    f"⚠️ Không thể chạy vì thời gian đăng đã qua!\n\n"
-                    f"Thời gian đã đặt: {post.scheduled_time_vn.strftime('%d/%m/%Y %H:%M')}\n"
-                    f"Thời gian hiện tại: {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                    f"Vui lòng click vào ⚙️ để đặt lại thời gian."
-                )
-                return
+            # Nếu là chế độ "Đăng ngay" → set thời gian = hiện tại
+            if post.post_now:
+                post.scheduled_time_vn = datetime.now(VN_TZ)
+                post.post_now = False  # Clear flag sau khi set time
+                post.log("⚡ Đăng ngay - Đã set thời gian = hiện tại")
+            else:
+                # Chế độ bình thường → kiểm tra thời gian phải là tương lai
+                now = datetime.now(VN_TZ)
+                if post.scheduled_time_vn and post.scheduled_time_vn <= now:
+                    messagebox.showerror(
+                        "Lỗi",
+                        f"⚠️ Không thể chạy vì thời gian đăng đã qua!\n\n"
+                        f"Thời gian đã đặt: {post.scheduled_time_vn.strftime('%d/%m/%Y %H:%M')}\n"
+                        f"Thời gian hiện tại: {now.strftime('%d/%m/%Y %H:%M')}\n\n"
+                        f"Vui lòng click vào ⚙️ để đặt lại thời gian."
+                    )
+                    return
 
         # Toggle trạng thái
         post.is_paused = not post.is_paused
@@ -1128,9 +1759,17 @@ class PostTab(ttk.Frame):
         # Video info
         ttk.Label(
             dialog,
-            text=f"📹 {post.video_name}",
-            font=("Segoe UI", 10, "bold")
-        ).pack(pady=10)
+            text=f"📹 File gốc: {post.video_name}",
+            font=("Segoe UI", 9)
+        ).pack(pady=(10, 5))
+
+        # Title input
+        title_frame = ttk.Frame(dialog)
+        title_frame.pack(padx=20, pady=(0, 10), fill="x")
+        ttk.Label(title_frame, text="Tên video:", width=12).pack(side="left")
+        title_entry = ttk.Entry(title_frame, width=50, font=("Segoe UI", 10))
+        title_entry.pack(side="left", padx=5, fill="x", expand=True)
+        title_entry.insert(0, post.title)  # Load existing title
 
         # Account selection
         ttk.Label(dialog, text="Chọn tài khoản:").pack(anchor="w", padx=20, pady=(10, 0))
@@ -1290,8 +1929,9 @@ class PostTab(ttk.Frame):
             mode = schedule_mode.get()
 
             if mode == "now":
-                # Đăng ngay = hiện tại + 1 phút
-                scheduled_time = datetime.now(VN_TZ) + timedelta(minutes=1)
+                # Đăng ngay - sẽ set thời gian khi nhấn Start
+                scheduled_time = None
+                post_now_flag = True
             else:
                 # Chọn thời gian cụ thể từ wheel picker
                 try:
@@ -1302,6 +1942,7 @@ class PostTab(ttk.Frame):
                     minute = int(wheel_minute.get())
 
                     scheduled_time = datetime(year, month, day, hour, minute, tzinfo=VN_TZ)
+                    post_now_flag = False
                 except ValueError as e:
                     messagebox.showerror("Lỗi", f"Thời gian không hợp lệ: {e}", parent=dialog)
                     return
@@ -1323,6 +1964,8 @@ class PostTab(ttk.Frame):
             post.vm_name = vm_info["vm_name"]
             post.account_display = vm_info["display"]
             post.scheduled_time_vn = scheduled_time
+            post.post_now = post_now_flag
+            post.title = title_entry.get().strip() or post.video_name  # Save custom title
             post.status = "pending"
             # Mặc định là paused, người dùng phải nhấn Start để chạy
             post.is_paused = True
@@ -1375,15 +2018,10 @@ class PostTab(ttk.Frame):
             messagebox.showwarning("Cảnh báo", "Không thể xóa post đang xử lý!")
             return
 
-        confirm = messagebox.askyesno(
-            "Xác nhận",
-            f"Bạn có chắc muốn xóa:\n{post.video_name}?"
-        )
-
-        if confirm:
-            self.posts.remove(post)
-            save_scheduled_posts(self.posts)
-            self.load_posts_to_table()
+        # Xóa trực tiếp không cần confirm
+        self.posts.remove(post)
+        save_scheduled_posts(self.posts)
+        self.load_posts_to_table()
 
     def start_scheduler(self):
         """Start background scheduler"""

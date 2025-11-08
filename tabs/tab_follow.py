@@ -25,7 +25,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import traceback
 import sys
-from utils.download_dlp import download_video_api
+from utils.download_dlp import download_video_api, download_tiktok_direct_url
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim
@@ -33,8 +33,15 @@ from utils.vm_manager import vm_manager
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from config import LDCONSOLE_EXE
 from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, TIMEOUT_DEFAULT
-# Sau dòng: from utils.delete_file import clear_dcim
-# THÊM VÀO:
+from utils.api_manager_multi import multi_api_manager
+from utils.tiktok_api_new import (
+    extract_tiktok_handle,
+    fetch_tiktok_videos,
+    filter_videos_newer_than,
+    convert_to_output_format,
+    check_tiktok_api_key_valid
+)
+from utils.yt_api import check_api_key_valid
 
 class StoppableWorker:
     """Helper class để chạy tác vụ có thể dừng"""
@@ -359,11 +366,8 @@ class Stream:
                         except Exception as e:
                             self.log(f"[YouTube] Lỗi kênh {ch_url}: {e}")
 
-                elif platform == "tiktok":
-                    # ========== QUÉT KÊNH TIKTOK ==========
-                    # Không dùng extract_channel_id / playlist của YouTube
-                    pass
-                else:
+                elif platform != "tiktok":
+                    # TikTok logic đã được xử lý ở phần "XỬ LÝ VIDEO" bên dưới
                     self.log(f"Nền tảng chưa hỗ trợ: {platform}")
 
                 
@@ -395,24 +399,40 @@ class Stream:
                         self.log("Không có video mới.")
 
                 elif self.cfg.get("platform") == "tiktok":
-                    # from utils.tiktok_api import fetch_tiktok_videos_newer_than
-                    new_rows = []
-                    for ch_url in self.cfg.get("channels", []):
-                        try:
-                            vids = fetch_tiktok_videos_newer_than(ch_url, cutoff_dt)
-                            if vids:
-                                new_rows.extend(vids)
-                                self.log(f"[TikTok] {ch_url}: +{len(vids)} video mới.")
-                            else:
-                                self.log(f"[TikTok] {ch_url}: không có video mới.")
-                        except Exception as e:
-                            self.log(f"[TikTok] Lỗi lấy video từ {ch_url}: {e}")
-
-                    if new_rows:
-                        added = append_records(self.cfg["out_path"], new_rows)
-                        self.log(f"🎵 Đã thêm {added}/{len(new_rows)} video TikTok mới vào file.")
+                    # ========== XỬ LÝ TIKTOK ==========
+                    tiktok_key = multi_api_manager.get_next_tiktok_key()
+                    if not tiktok_key:
+                        self.log("❌ Không có TikTok API key. Vui lòng thêm key trong tab Đăng bài → 🔑 Quản lý API")
                     else:
-                        self.log("Không có video TikTok mới.")
+                        new_rows = []
+                        for ch_url in self.cfg.get("channels", []):
+                            if self.stop_event.is_set():
+                                break
+                            try:
+                                handle = extract_tiktok_handle(ch_url)
+                                self.log(f"[TikTok] Đang quét @{handle}...")
+
+                                # Fetch all videos from TikTok
+                                all_videos = fetch_tiktok_videos(handle, tiktok_key, self.log)
+
+                                # Filter videos newer than cutoff_dt
+                                filtered = filter_videos_newer_than(all_videos, cutoff_dt, self.log)
+
+                                if filtered:
+                                    # Convert to output format
+                                    converted = convert_to_output_format(filtered)
+                                    new_rows.extend(converted)
+                                    self.log(f"[TikTok] {ch_url}: +{len(converted)} video mới.")
+                                else:
+                                    self.log(f"[TikTok] {ch_url}: không có video mới.")
+                            except Exception as e:
+                                self.log(f"[TikTok] Lỗi lấy video từ {ch_url}: {e}")
+
+                        if new_rows:
+                            added = append_records(self.cfg["out_path"], new_rows)
+                            self.log(f"🎵 Đã thêm {added}/{len(new_rows)} video TikTok mới vào file.")
+                        else:
+                            self.log("Không có video TikTok mới.")
 
                 else:
                     self.log(f"Nền tảng chưa hỗ trợ: {self.cfg.get('platform')}")
@@ -444,8 +464,8 @@ class Stream:
 
                         # ========== ACQUIRE VM LOCK ==========
                         self.log(f"🔒 Chờ máy ảo '{vm_name}' sẵn sàng...")
-                        if not vm_manager.acquire_vm(vm_name, timeout=600, caller=f"Follow:{self.cfg['name']}"):
-                            self.log(f"⏱️ Timeout chờ máy ảo '{vm_name}' sau 10 phút - Bỏ qua video")
+                        if not vm_manager.acquire_vm(vm_name, timeout=5400, caller=f"Follow:{self.cfg['name']}"):
+                            self.log(f"⏱️ Timeout chờ máy ảo '{vm_name}' sau 1.5 giờ - Bỏ qua video")
                             continue
 
                         vm_acquired = True
@@ -501,8 +521,16 @@ class Stream:
                                     break
 
                                 self.log(f"📥 Đang tải video: {title}")
+
+                                # Chọn download function dựa vào platform
+                                platform = self.cfg.get("platform", "youtube")
+                                if platform == "tiktok":
+                                    download_func = download_tiktok_direct_url
+                                else:
+                                    download_func = download_video_api
+
                                 success, video_path, reason = self.worker_helper.run_blocking_func(
-                                    download_video_api,
+                                    download_func,
                                     url,
                                     log_callback=lambda msg: self.log(msg),
                                     timeout=600,  # 10 phút
@@ -669,6 +697,18 @@ class Stream:
 
                                 # ========== CẬP NHẬT TRẠNG THÁI ==========
                                 vid["status"] = "post"
+
+                                # ========== UPDATE CUTOFF_DT ==========
+                                try:
+                                    published_iso = vid.get("publishedAt")
+                                    if published_iso:
+                                        video_time = iso_to_datetime(published_iso)
+                                        if video_time > cutoff_dt:
+                                            cutoff_dt = video_time
+                                            self.log(f"📅 Cập nhật cutoff → {cutoff_dt.strftime('%d/%m/%Y %H:%M')}")
+                                except Exception as e:
+                                    self.log(f"⚠️ Không thể cập nhật cutoff_dt: {e}")
+
                                 try:
                                     if os.path.exists(video_path):
                                         os.remove(video_path)
@@ -692,18 +732,10 @@ class Stream:
                 except Exception as e:
                     self.log(f"⚠️ Lỗi xử lý video: {e}")
                     logger.exception("Error processing video")
-                
-                # Cập nhật cutoff
-                try:
-                    latest_iso = max(new_rows, key=lambda x: x["publishedAt"])["publishedAt"]
-                    cutoff_dt = iso_to_datetime(latest_iso)
-                except:
-                    pass
-                #     else:
-                #         self.log("Không có video phù hợp sau khi lọc.")
-                # else:
-                #     self.log("Không có video mới.")
-                
+
+                # NOTE: cutoff_dt đã được update ở line 707-713 SAU KHI đăng video thành công
+                # KHÔNG update từ new_rows vì video có thể chưa đăng (do lỗi)
+
                 # ========== ĐẾM NGƯỢC (Option 1: Check manual) ==========
                 if self.stop_event.is_set():
                     break
@@ -832,7 +864,7 @@ class FollowTab(ttk.Frame):
 
         columns = ("stt", "name", "account", "watch", "interval", "status", "run", "stop", "log", "edit", "delete")
 
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=18)
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=10)
 
         # Configure alternating row colors (striped)
         self.tree.tag_configure("oddrow", background="#f0f0f0")
@@ -899,163 +931,208 @@ class FollowTab(ttk.Frame):
 
     # ---------- POPUP: API MANAGER ----------
     def open_api_manager(self):
-        api_manager.refresh()
+        """Mở dialog quản lý API keys cho YouTube và TikTok"""
+        multi_api_manager.refresh()
 
-        win = tk.Toplevel(self)
-        win.title("Quản lý API keys")
-        win.geometry("750x480")
-        win.grab_set()
+        # Main dialog
+        dialog = tk.Toplevel(self)
+        dialog.title("Quản lý API Keys")
+        dialog.geometry("800x600")
+        dialog.grab_set()
 
-        frm = tk.Frame(win)
-        frm.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Notebook (tabs)
+        notebook = ttk.Notebook(dialog)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        tk.Label(frm, text=f"File: {API_FILE}").pack(anchor="w")
+        # Tab 1: YouTube
+        youtube_frame = ttk.Frame(notebook)
+        notebook.add(youtube_frame, text="📺 YouTube API")
+        self._build_api_tab_follow(youtube_frame, "youtube", dialog)
 
-        # Frame cho listbox và status
-        list_frame = tk.Frame(frm)
-        list_frame.pack(fill=tk.BOTH, expand=True, pady=6)
+        # Tab 2: TikTok
+        tiktok_frame = ttk.Frame(notebook)
+        notebook.add(tiktok_frame, text="🎵 TikTok API")
+        self._build_api_tab_follow(tiktok_frame, "tiktok", dialog)
 
-        # Listbox hiển thị API keys
-        listbox = tk.Listbox(list_frame, height=12, font=("Courier", 9))
+        # Info label
+        info_label = ttk.Label(
+            dialog,
+            text="💡 File lưu tại: data/api/apis.json",
+            font=("Segoe UI", 9),
+            foreground="gray"
+        )
+        info_label.pack(pady=(0, 10))
+
+    def _build_api_tab_follow(self, parent, platform, dialog):
+        """Xây dựng nội dung cho 1 tab API với chức năng Check"""
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Listbox
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        listbox = tk.Listbox(list_frame, height=15, font=("Courier", 9))
         listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         listbox.config(yscrollcommand=scrollbar.set)
 
-        # Dict lưu trạng thái check của mỗi key
-        key_status = {}
-
-        # Load keys và hiển thị
-        def load_and_display_keys():
-            listbox.delete(0, tk.END)
-            key_status.clear()
-            keys = api_manager.load_keys()
-            for i, k in enumerate(keys):
-                display_text = f"[{i+1}] {k[:20]}...{k[-10:]}" if len(k) > 35 else f"[{i+1}] {k}"
-                listbox.insert(tk.END, display_text)
-                key_status[i] = {"key": k, "status": None}
-
-        load_and_display_keys()
-
         # Status label
-        status_label = tk.Label(frm, text="", anchor="w", justify="left", fg="blue")
-        status_label.pack(fill=tk.X, pady=(0, 6))
+        status_label = ttk.Label(frame, text="", foreground="blue")
+        status_label.pack(fill=tk.X, pady=(0, 10))
 
-        # Buttons frame
-        btns = tk.Frame(frm)
-        btns.pack(fill=tk.X)
+        # Load keys
+        def load_keys():
+            listbox.delete(0, tk.END)
+            keys = multi_api_manager.get_keys(platform)
+            for i, k in enumerate(keys):
+                display = f"[{i+1}] {k[:30]}...{k[-10:]}" if len(k) > 45 else f"[{i+1}] {k}"
+                listbox.insert(tk.END, display)
+            status_label.config(text=f"📊 Tổng: {len(keys)} API keys", foreground="blue")
+
+        load_keys()
+
+        # Buttons Row 1: Add, Remove, Copy
+        btn_frame1 = ttk.Frame(frame)
+        btn_frame1.pack(fill=tk.X, pady=(0, 5))
 
         def add_key():
-            k = simpledialog.askstring("Thêm API key", "Dán API key mới:", parent=win)
-            if k and k.strip():
-                current_keys = [key_status[i]["key"] for i in range(len(key_status))]
-                current_keys.append(k.strip())
-                api_manager.save_keys(current_keys)
-                load_and_display_keys()
-                status_label.config(text="✓ Đã thêm API key mới", fg="green")
+            from tkinter import simpledialog
+            key = simpledialog.askstring(
+                f"Thêm {platform.upper()} API",
+                f"Nhập {platform.upper()} API key:",
+                parent=dialog
+            )
+            if key and key.strip():
+                if multi_api_manager.add_key(platform, key.strip()):
+                    load_keys()
+                    status_label.config(text="✅ Đã thêm API key mới", foreground="green")
+                else:
+                    status_label.config(text="⚠️ API key đã tồn tại", foreground="orange")
 
-        def del_key():
+        def remove_key():
             sel = listbox.curselection()
             if not sel:
-                messagebox.showwarning("Xóa", "Hãy chọn 1 key để xóa.", parent=win)
+                messagebox.showwarning("Xóa", "Hãy chọn 1 key để xóa", parent=dialog)
                 return
-            
-            idx = sel[0]
-            if messagebox.askyesno("Xác nhận xóa", f"Xóa API key #{idx+1}?", parent=win):
-                current_keys = [key_status[i]["key"] for i in range(len(key_status)) if i != idx]
-                api_manager.save_keys(current_keys)
-                load_and_display_keys()
-                status_label.config(text=f"✓ Đã xóa API key #{idx+1}", fg="green")
 
-        def check_selected_key():
+            idx = sel[0]
+            confirm = messagebox.askyesno(
+                "Xác nhận",
+                f"Xóa API key #{idx+1}?",
+                parent=dialog
+            )
+            if confirm:
+                if multi_api_manager.remove_key(platform, idx):
+                    load_keys()
+                    status_label.config(text=f"✅ Đã xóa API key #{idx+1}", foreground="green")
+
+        def copy_key():
             sel = listbox.curselection()
             if not sel:
-                messagebox.showwarning("Kiểm tra", "Hãy chọn 1 key để kiểm tra.", parent=win)
+                messagebox.showwarning("Copy", "Hãy chọn 1 key để copy", parent=dialog)
                 return
-            
+
             idx = sel[0]
-            api_key = key_status[idx]["key"]
-            
-            status_label.config(text=f"⏳ Đang kiểm tra API key #{idx+1}...", fg="blue")
-            win.update()
-            
+            keys = multi_api_manager.get_keys(platform)
+            if 0 <= idx < len(keys):
+                dialog.clipboard_clear()
+                dialog.clipboard_append(keys[idx])
+                status_label.config(text=f"✅ Đã copy API key #{idx+1} vào clipboard", foreground="green")
+
+        ttk.Button(btn_frame1, text="➕ Thêm", command=add_key, width=12).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame1, text="🗑️ Xóa", command=remove_key, width=12).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame1, text="📋 Copy", command=copy_key, width=12).pack(side=tk.LEFT, padx=3)
+
+        # Buttons Row 2: Check Selected, Check All
+        btn_frame2 = ttk.Frame(frame)
+        btn_frame2.pack(fill=tk.X)
+
+        def check_selected():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showwarning("Kiểm tra", "Hãy chọn 1 key để kiểm tra", parent=dialog)
+                return
+
+            idx = sel[0]
+            keys = multi_api_manager.get_keys(platform)
+            if idx >= len(keys):
+                return
+
+            api_key = keys[idx]
+            status_label.config(text=f"⏳ Đang kiểm tra API key #{idx+1}...", foreground="blue")
+            dialog.update()
+
             def do_check():
-                result = check_api_key_valid(api_key)
-                key_status[idx]["status"] = result
-                win.after(0, lambda: update_check_result(idx, result))
-            
+                if platform == "youtube":
+                    result = check_api_key_valid(api_key)
+                else:  # tiktok
+                    result = check_tiktok_api_key_valid(api_key)
+
+                dialog.after(0, lambda: show_check_result(idx, result))
+
             threading.Thread(target=do_check, daemon=True).start()
 
-        def update_check_result(idx, result):
+        def show_check_result(idx, result):
             msg = result["message"]
-            if result["quota_remaining"] is not None:
+            if result.get("quota_remaining") is not None:
                 msg += f" (Quota: {result['quota_remaining']})"
-            
-            color = "green" if result["valid"] else "red"
-            status_label.config(text=f"API key #{idx+1}: {msg}", fg=color)
 
-        def check_all_keys():
-            if not key_status:
-                messagebox.showinfo("Kiểm tra tất cả", "Không có API key nào để kiểm tra.", parent=win)
+            color = "green" if result["valid"] else "red"
+            status_label.config(text=f"API key #{idx+1}: {msg}", foreground=color)
+
+        def check_all():
+            keys = multi_api_manager.get_keys(platform)
+            if not keys:
+                messagebox.showinfo("Kiểm tra tất cả", "Không có API key nào để kiểm tra", parent=dialog)
                 return
-            
-            status_label.config(text="⏳ Đang kiểm tra tất cả API keys...", fg="blue")
-            win.update()
-            
+
+            status_label.config(text="⏳ Đang kiểm tra tất cả API keys...", foreground="blue")
+            dialog.update()
+
             def do_check_all():
                 results = []
-                for i in range(len(key_status)):
-                    api_key = key_status[i]["key"]
-                    result = check_api_key_valid(api_key)
-                    key_status[i]["status"] = result
+                for i, api_key in enumerate(keys):
+                    if platform == "youtube":
+                        result = check_api_key_valid(api_key)
+                    else:  # tiktok
+                        result = check_tiktok_api_key_valid(api_key)
                     results.append((i+1, result))
-                
-                win.after(0, lambda: show_all_results(results))
-            
+
+                dialog.after(0, lambda: show_all_results(results))
+
             threading.Thread(target=do_check_all, daemon=True).start()
 
         def show_all_results(results):
             valid_count = sum(1 for _, r in results if r["valid"])
             invalid_count = len(results) - valid_count
-            
+
             summary = f"✓ Hoàn thành: {valid_count} keys hoạt động, {invalid_count} keys lỗi"
-            status_label.config(text=summary, fg="green" if invalid_count == 0 else "orange")
-            
+            status_label.config(text=summary, foreground="green" if invalid_count == 0 else "orange")
+
             details = []
             for idx, result in results:
                 status_icon = "✓" if result["valid"] else "✗"
                 details.append(f"Key #{idx}: {status_icon} {result['message']}")
-            
+
             detail_msg = "\n".join(details)
-            
-            detail_win = tk.Toplevel(win)
+
+            detail_win = tk.Toplevel(dialog)
             detail_win.title("Kết quả kiểm tra API keys")
             detail_win.geometry("600x400")
             detail_win.grab_set()
-            
+
             txt = tk.Text(detail_win, wrap="word", font=("Courier", 9))
             txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
             txt.insert("1.0", detail_msg)
             txt.config(state="disabled")
-            
+
             ttk.Button(detail_win, text="Đóng", command=detail_win.destroy).pack(pady=5)
 
-        # Row 1: Thêm, Xóa
-        btn_row1 = tk.Frame(btns)
-        btn_row1.pack(fill=tk.X, pady=2)
-        
-        ttk.Button(btn_row1, text="➕ Thêm", command=add_key).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_row1, text="🗑 Xóa", command=del_key).pack(side=tk.LEFT, padx=4)
-        
-        # Row 2: Check đơn, Check tất cả
-        btn_row2 = tk.Frame(btns)
-        btn_row2.pack(fill=tk.X, pady=2)
-        
-        ttk.Button(btn_row2, text="🔍 Kiểm tra key đã chọn", command=check_selected_key, width=22).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_row2, text="🔍 Kiểm tra tất cả", command=check_all_keys, width=18).pack(side=tk.LEFT, padx=4)
-        
-        ttk.Button(btn_row2, text="Đóng", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame2, text="🔍 Kiểm tra key đã chọn", command=check_selected, width=22).pack(side=tk.LEFT, padx=3)
+        ttk.Button(btn_frame2, text="🔍 Kiểm tra tất cả", command=check_all, width=18).pack(side=tk.LEFT, padx=3)
 
     # ---------- POPUP: THÊM/SỬA LUỒNG ----------
     def open_add_stream_dialog(self, edit_iid=None):
