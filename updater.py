@@ -253,8 +253,26 @@ class Updater:
         try:
             print("📥 Đang tải code mới từ GitHub...")
 
+            # Step 1: Add all files to Git (including untracked)
+            # This prevents "untracked working tree files would be overwritten" error
+            subprocess.run(
+                ["git", "add", "-A"],
+                cwd=self.app_dir,
+                capture_output=True,
+                text=True
+            )
+
+            # Step 2: Stash any local changes (if any)
+            subprocess.run(
+                ["git", "stash", "--include-untracked"],
+                cwd=self.app_dir,
+                capture_output=True,
+                text=True
+            )
+
+            # Step 3: Reset to remote branch (force update)
             result = subprocess.run(
-                ["git", "pull", "origin", "main"],
+                ["git", "reset", "--hard", "origin/main"],
                 cwd=self.app_dir,
                 capture_output=True,
                 text=True,
@@ -262,8 +280,18 @@ class Updater:
             )
 
             if result.returncode != 0:
-                print(f"❌ Lỗi khi pull code: {result.stderr}")
-                return False
+                print(f"❌ Lỗi khi reset: {result.stderr}")
+                # Try pull anyway
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main", "--allow-unrelated-histories"],
+                    cwd=self.app_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                if result.returncode != 0:
+                    print(f"❌ Lỗi khi pull code: {result.stderr}")
+                    return False
 
             print("✅ Đã tải code mới thành công!")
             return True
