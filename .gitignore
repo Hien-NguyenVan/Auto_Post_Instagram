@@ -43,10 +43,8 @@ downloads/
 Thumbs.db
 
 # Sensitive data - User private data (VM configs, API keys, etc.)
-data/*.json
-data/api/*.txt
-data/api/*.json
-data/output/*.json
+# Ignore entire data folder - each user has their own VM configs and API keys
+data/
 
 # PyInstaller spec files
 *.spec
