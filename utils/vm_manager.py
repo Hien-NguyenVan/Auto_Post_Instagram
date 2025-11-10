@@ -184,6 +184,56 @@ class VMManager:
         logger.error(f"⏱️ Timeout {timeout}s - Máy ảo '{vm_name}' chưa sẵn sàng")
         return False
 
+    @staticmethod
+    def wait_adb_ready(device: str, adb_path: str, timeout: int = 30,
+                       check_interval: int = 2) -> bool:
+        """
+        Chờ ADB kết nối đến device.
+
+        Args:
+            device: Device name (vd: "emulator-5556")
+            adb_path: Đường dẫn đến adb.exe
+            timeout: Thời gian chờ tối đa (giây)
+            check_interval: Thời gian chờ giữa các lần check (giây)
+
+        Returns:
+            bool: True nếu ADB đã connect, False nếu timeout
+        """
+        logger = logging.getLogger(__name__)
+        elapsed = 0
+
+        logger.info(f"⏳ Chờ ADB kết nối đến '{device}' (timeout={timeout}s)...")
+
+        while elapsed < timeout:
+            try:
+                result = subprocess.run(
+                    [adb_path, "devices"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                # Check if device is in the output
+                if device in result.stdout:
+                    logger.info(f"✅ ADB đã kết nối đến '{device}' sau {elapsed}s")
+                    return True
+                else:
+                    logger.debug(f"Device '{device}' chưa xuất hiện trong 'adb devices'")
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"adb devices timeout khi check '{device}'")
+            except Exception as e:
+                logger.error(f"Lỗi khi check ADB '{device}': {e}")
+
+            time.sleep(check_interval)
+            elapsed += check_interval
+
+        logger.error(f"⏱️ Timeout {timeout}s - ADB chưa kết nối đến '{device}'")
+        return False
+
 
 # Singleton instance
 vm_manager = VMManager()

@@ -70,46 +70,53 @@ class YouTubeDownloader:
             self.log(f"📁 File: {video_path}")
 
             # ====== Kiểm tra codec ======
-            probe = subprocess.run(
-                [
-                    "ffprobe", "-v", "error",
-                    "-select_streams", "v:0",
-                    "-show_entries", "stream=codec_name",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
-                    video_path
-                ],
-                capture_output=True, text=True, encoding="utf-8", errors="ignore",
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            codec = (probe.stdout or "").strip().lower()
-            self.log(f"🎞️ Codec hiện tại: {codec or 'unknown'}")
-
-            # ====== Nếu không phải H.264 thì chuyển mã ======
-            if codec not in ("h264", "avc1"):
-                converted_path = os.path.join(self.output_dir, f"converted_{temp_id}.mp4")
-                self.log(f"⚙️ Đang chuyển mã {codec or 'unknown'} → H.264 ...")
-
-                subprocess.run(
+            try:
+                probe = subprocess.run(
                     [
-                        "ffmpeg", "-y", "-i", video_path,
-                        "-c:v", "libx264", "-preset", "fast",
-                        "-c:a", "aac", "-b:a", "192k",
-                        "-movflags", "+faststart",
-                        converted_path,
+                        "ffprobe", "-v", "error",
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=codec_name",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        video_path
                     ],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    capture_output=True, text=True, encoding="utf-8", errors="ignore",
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                codec = (probe.stdout or "").strip().lower()
+                self.log(f"🎞️ Codec hiện tại: {codec or 'unknown'}")
 
-                try:
-                    os.remove(video_path)
-                except Exception:
-                    pass
+                # ====== Nếu không phải H.264 thì chuyển mã ======
+                if codec not in ("h264", "avc1"):
+                    converted_path = os.path.join(self.output_dir, f"converted_{temp_id}.mp4")
+                    self.log(f"⚙️ Đang chuyển mã {codec or 'unknown'} → H.264 ...")
 
-                video_path = converted_path
-                self.log("✅ Đã chuyển mã sang H.264 thành công.")
+                    subprocess.run(
+                        [
+                            "ffmpeg", "-y", "-i", video_path,
+                            "-c:v", "libx264", "-preset", "fast",
+                            "-c:a", "aac", "-b:a", "192k",
+                            "-movflags", "+faststart",
+                            converted_path,
+                        ],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+
+                    try:
+                        os.remove(video_path)
+                    except Exception:
+                        pass
+
+                    video_path = converted_path
+                    self.log("✅ Đã chuyển mã sang H.264 thành công.")
+
+            except FileNotFoundError:
+                self.log("⚠️ Không tìm thấy ffprobe/ffmpeg - Bỏ qua kiểm tra codec")
+                self.log("💡 Video vẫn có thể đăng được, nhưng nên cài ffmpeg để đảm bảo tương thích")
+            except Exception as e:
+                self.log(f"⚠️ Lỗi khi kiểm tra codec: {e} - Bỏ qua và tiếp tục")
 
             self.log(f"🏁 Hoàn tất: {video_path}")
             return video_path
@@ -165,41 +172,47 @@ def download_tiktok_video(url, output_dir="temp", log_callback=None):
             raise FileNotFoundError("File không tồn tại sau khi tải.")
 
         # ====== Kiểm tra codec ======
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                video_path
-            ],
-            capture_output=True, text=True, encoding="utf-8", errors="ignore",
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        codec = (probe.stdout or "").strip().lower()
-        log(f"🎞️ [TikTok] Codec hiện tại: {codec or 'unknown'}")
-
-        # ====== Nếu không phải H.264 thì convert ======
-        if codec not in ("h264", "avc1"):
-            converted = os.path.join(output_dir, f"converted_tiktok_{temp_id}.mp4")
-            log(f"⚙️ [TikTok] Đang chuyển mã {codec or 'unknown'} → H.264 ...")
-
-            subprocess.run(
+        try:
+            probe = subprocess.run(
                 [
-                    "ffmpeg", "-y", "-i", video_path,
-                    "-c:v", "libx264", "-preset", "fast",
-                    "-c:a", "aac", "-b:a", "192k",
-                    "-movflags", "+faststart",
-                    converted,
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    video_path
                 ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True, text=True, encoding="utf-8", errors="ignore",
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            os.remove(video_path)
-            video_path = converted
-            log("✅ [TikTok] Đã chuyển mã sang H.264 thành công.")
+            codec = (probe.stdout or "").strip().lower()
+            log(f"🎞️ [TikTok] Codec hiện tại: {codec or 'unknown'}")
+
+            # ====== Nếu không phải H.264 thì convert ======
+            if codec not in ("h264", "avc1"):
+                converted = os.path.join(output_dir, f"converted_tiktok_{temp_id}.mp4")
+                log(f"⚙️ [TikTok] Đang chuyển mã {codec or 'unknown'} → H.264 ...")
+
+                subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-i", video_path,
+                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-movflags", "+faststart",
+                        converted,
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                os.remove(video_path)
+                video_path = converted
+                log("✅ [TikTok] Đã chuyển mã sang H.264 thành công.")
+
+        except FileNotFoundError:
+            log("⚠️ [TikTok] Không tìm thấy ffprobe/ffmpeg - Bỏ qua kiểm tra codec")
+        except Exception as e:
+            log(f"⚠️ [TikTok] Lỗi khi kiểm tra codec: {e} - Bỏ qua và tiếp tục")
 
         log(f"🏁 [TikTok] Hoàn tất: {video_path}")
         return video_path
@@ -251,41 +264,47 @@ def download_tiktok_direct_url(url, output_dir="temp", log_callback=None):
             return None
 
         # ====== Kiểm tra codec ======
-        probe = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=codec_name",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                output_path
-            ],
-            capture_output=True, text=True, encoding="utf-8", errors="ignore",
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        codec = (probe.stdout or "").strip().lower()
-        log(f"🎞️ [TikTok Direct] Codec hiện tại: {codec or 'unknown'}")
-
-        # ====== Nếu không phải H.264 thì convert ======
-        if codec not in ("h264", "avc1"):
-            converted = os.path.join(output_dir, f"converted_tiktok_{temp_id}.mp4")
-            log(f"⚙️ [TikTok Direct] Đang chuyển mã {codec or 'unknown'} → H.264 ...")
-
-            subprocess.run(
+        try:
+            probe = subprocess.run(
                 [
-                    "ffmpeg", "-y", "-i", output_path,
-                    "-c:v", "libx264", "-preset", "fast",
-                    "-c:a", "aac", "-b:a", "192k",
-                    "-movflags", "+faststart",
-                    converted,
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    output_path
                 ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True, text=True, encoding="utf-8", errors="ignore",
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            os.remove(output_path)
-            output_path = converted
-            log("✅ [TikTok Direct] Đã chuyển mã sang H.264 thành công.")
+            codec = (probe.stdout or "").strip().lower()
+            log(f"🎞️ [TikTok Direct] Codec hiện tại: {codec or 'unknown'}")
+
+            # ====== Nếu không phải H.264 thì convert ======
+            if codec not in ("h264", "avc1"):
+                converted = os.path.join(output_dir, f"converted_tiktok_{temp_id}.mp4")
+                log(f"⚙️ [TikTok Direct] Đang chuyển mã {codec or 'unknown'} → H.264 ...")
+
+                subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-i", output_path,
+                        "-c:v", "libx264", "-preset", "fast",
+                        "-c:a", "aac", "-b:a", "192k",
+                        "-movflags", "+faststart",
+                        converted,
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                os.remove(output_path)
+                output_path = converted
+                log("✅ [TikTok Direct] Đã chuyển mã sang H.264 thành công.")
+
+        except FileNotFoundError:
+            log("⚠️ [TikTok Direct] Không tìm thấy ffprobe/ffmpeg - Bỏ qua kiểm tra codec")
+        except Exception as e:
+            log(f"⚠️ [TikTok Direct] Lỗi khi kiểm tra codec: {e} - Bỏ qua và tiếp tục")
 
         log(f"🏁 [TikTok Direct] Hoàn tất: {output_path}")
         return os.path.abspath(output_path)

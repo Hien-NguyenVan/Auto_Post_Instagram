@@ -21,7 +21,7 @@ import tkinter as tk
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 
-from config import LDCONSOLE_EXE, DATA_DIR
+from config import LDCONSOLE_EXE, DATA_DIR, ADB_EXE
 from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
@@ -521,9 +521,20 @@ class PostScheduler(threading.Thread):
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 return
 
-            # Wait a bit more for ADB to connect
-            post.log(f"⏳ Chờ ADB kết nối...")
-            time.sleep(WAIT_LONG)
+            # Wait for ADB to connect
+            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=30):
+                post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
+                post.log(f"🛑 Đang tắt máy ảo...")
+                subprocess.run(
+                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                post.status = "failed"
+                self.ui_queue.put(("status_update", post.id, "failed"))
+                self.running_posts.discard(post.id)
+                save_scheduled_posts(self.posts)
+                return
 
             # Check stop request after VM start
             if post.stop_requested:
@@ -532,6 +543,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -561,6 +573,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -575,6 +588,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -597,15 +611,27 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
 
-            # Wait a bit more for ADB to reconnect after reboot
-            post.log(f"⏳ Chờ ADB kết nối lại...")
-            time.sleep(WAIT_MEDIUM)
+            # Wait for ADB to reconnect after reboot
+            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=30):
+                post.log(f"⏱️ Timeout - ADB không kết nối lại được sau reboot")
+                post.log(f"🛑 Đang tắt máy ảo...")
+                subprocess.run(
+                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                time.sleep(WAIT_LONG)
+                post.status = "failed"
+                self.ui_queue.put(("status_update", post.id, "failed"))
+                self.running_posts.discard(post.id)
+                save_scheduled_posts(self.posts)
+                return
 
             # Check stop request after reboot
             if post.stop_requested:
@@ -614,6 +640,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -635,6 +662,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -648,6 +676,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -671,6 +700,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -684,7 +714,7 @@ class PostScheduler(threading.Thread):
                 [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            time.sleep(WAIT_SHORT)
+            time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
 
             # Mark as posted
             post.status = "posted"
@@ -703,6 +733,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
+                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
             except:
                 pass
 
@@ -1057,40 +1088,54 @@ class PostTab(ttk.Frame):
                     channel_id = extract_channel_id(url, multi_api_manager)
                     uploads_playlist_id = get_uploads_playlist_id(channel_id, multi_api_manager)
 
-                    # Get latest videos (no time filter, just get N newest)
+                    # Get latest videos (filter while fetching to get exactly N videos matching the mode)
                     from datetime import datetime, timezone
                     very_old_time = datetime(2000, 1, 1, tzinfo=timezone.utc)  # Get all videos since 2000
 
-                    video_ids = []
-                    for vid_id, pub_time in iter_playlist_videos_newer_than(uploads_playlist_id, very_old_time, multi_api_manager):
-                        video_ids.append(vid_id)
-                        if len(video_ids) >= video_count:
-                            break
+                    mode = mode_var.get()
+                    videos = []
+                    checked_count = 0
+                    max_check = 200  # Tối đa check 200 video để tránh loop vô hạn
 
-                    if not video_ids:
-                        status_label.config(text="❌ Không tìm thấy video nào", foreground="red")
-                        messagebox.showwarning(
-                            "Không có video",
-                            f"Không tìm thấy video nào từ kênh này",
-                            parent=dialog
-                        )
-                        return
-
-                    # Fetch video details
-                    status_label.config(text=f"⏳ Đang lấy thông tin {len(video_ids)} video...", foreground="blue")
+                    status_label.config(text=f"⏳ Đang quét kênh YouTube...", foreground="blue")
                     dialog.update()
 
-                    videos = fetch_video_details(video_ids, multi_api_manager)
+                    # Lặp qua từng video và lọc trong lúc lấy
+                    for vid_id, pub_time in iter_playlist_videos_newer_than(uploads_playlist_id, very_old_time, multi_api_manager):
+                        checked_count += 1
 
-                    # Filter by mode (shorts/long/both)
-                    mode = mode_var.get()
-                    videos = filter_videos_by_mode(videos, mode)
+                        # Fetch thông tin video này để check duration
+                        video_details = fetch_video_details([vid_id], multi_api_manager)
 
-                    # Filter: only keep videos with valid URL
-                    valid_videos = [v for v in videos if v.get("url")]
+                        if video_details:
+                            video = video_details[0]
 
-                    if not valid_videos:
-                        status_label.config(text="❌ Không có video hợp lệ", foreground="red")
+                            # Filter by mode
+                            filtered = filter_videos_by_mode([video], mode)
+
+                            if filtered:
+                                videos.append(filtered[0])
+                                status_label.config(
+                                    text=f"⏳ Đã tìm thấy {len(videos)}/{video_count} video phù hợp (đã check {checked_count} video)...",
+                                    foreground="blue"
+                                )
+                                dialog.update()
+
+                                # Dừng khi đủ số lượng cần
+                                if len(videos) >= video_count:
+                                    break
+
+                        # Dừng nếu đã check quá nhiều video
+                        if checked_count >= max_check:
+                            status_label.config(
+                                text=f"⚠️ Đã check {max_check} video, chỉ tìm thấy {len(videos)} video phù hợp",
+                                foreground="orange"
+                            )
+                            dialog.update()
+                            break
+
+                    if not videos:
+                        status_label.config(text="❌ Không tìm thấy video nào", foreground="red")
 
                         mode_text = {
                             "shorts": "Shorts (<182s)",
@@ -1099,8 +1144,21 @@ class PostTab(ttk.Frame):
                         }.get(mode, mode)
 
                         messagebox.showwarning(
+                            "Không có video",
+                            f"Không tìm thấy video {mode_text} nào từ kênh này (đã check {checked_count} video)",
+                            parent=dialog
+                        )
+                        return
+
+                    # Filter: only keep videos with valid URL
+                    valid_videos = [v for v in videos if v.get("url")]
+
+                    if not valid_videos:
+                        status_label.config(text="❌ Không có video hợp lệ", foreground="red")
+
+                        messagebox.showwarning(
                             "Không có video hợp lệ",
-                            f"Tìm thấy {len(video_ids)} video nhưng không có video {mode_text} nào có URL hợp lệ.",
+                            f"Tìm thấy {len(videos)} video nhưng không có video nào có URL hợp lệ.",
                             parent=dialog
                         )
                         return
