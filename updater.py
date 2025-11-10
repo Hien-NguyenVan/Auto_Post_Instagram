@@ -399,7 +399,7 @@ class Updater:
         print("=" * 60)
         print()
         print("✅ Tool đã được cập nhật lên phiên bản mới nhất")
-        print("💡 Chạy lại main.exe để sử dụng phiên bản mới")
+        print("💡 Chạy lại run_tool.bat hoặc main.py để sử dụng phiên bản mới")
         print()
 
         self.wait_and_exit(0)
