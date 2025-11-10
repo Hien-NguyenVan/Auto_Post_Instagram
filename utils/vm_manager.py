@@ -234,6 +234,72 @@ class VMManager:
         logger.error(f"⏱️ Timeout {timeout}s - ADB chưa kết nối đến '{device}'")
         return False
 
+    @staticmethod
+    def wait_vm_stopped(vm_name: str, ldconsole_path: str, timeout: int = 60,
+                        check_interval: int = 2) -> bool:
+        """
+        Chờ máy ảo TẮT hoàn toàn (status = "0" trong ldconsole list2).
+
+        QUAN TRỌNG: Phải gọi hàm này sau khi quit VM để đảm bảo VM đã tắt hẳn
+        trước khi release lock. Tránh race condition khi luồng khác acquire lock
+        trong lúc VM chưa tắt xong.
+
+        Args:
+            vm_name: Tên máy ảo
+            ldconsole_path: Đường dẫn đến ldconsole.exe
+            timeout: Thời gian chờ tối đa (giây)
+            check_interval: Thời gian chờ giữa các lần check (giây)
+
+        Returns:
+            bool: True nếu VM đã tắt hoàn toàn, False nếu timeout
+        """
+        logger = logging.getLogger(__name__)
+        elapsed = 0
+
+        logger.info(f"⏳ Chờ máy ảo '{vm_name}' tắt hoàn toàn (timeout={timeout}s)...")
+
+        while elapsed < timeout:
+            try:
+                result = subprocess.run(
+                    [ldconsole_path, "list2"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                # Parse output để check status
+                vm_found = False
+                for line in result.stdout.splitlines():
+                    parts = line.split(",")
+                    # Format: index,name,title,top_window,running,pid
+                    if len(parts) >= 5 and parts[1].strip() == vm_name:
+                        vm_found = True
+                        is_stopped = parts[4].strip() == "0"
+
+                        if is_stopped:
+                            logger.info(f"✅ Máy ảo '{vm_name}' đã tắt hoàn toàn sau {elapsed}s")
+                            return True
+                        else:
+                            logger.debug(f"VM '{vm_name}' status: {parts[4]} (đang tắt...)")
+                        break
+
+                # Nếu không tìm thấy VM trong list -> coi như đã xóa/tắt
+                if not vm_found:
+                    logger.info(f"✅ Máy ảo '{vm_name}' không còn trong danh sách (đã tắt)")
+                    return True
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"ldconsole list2 timeout khi check VM '{vm_name}'")
+            except Exception as e:
+                logger.error(f"Lỗi khi check status VM '{vm_name}': {e}")
+
+            time.sleep(check_interval)
+            elapsed += check_interval
+
+        logger.error(f"⏱️ Timeout {timeout}s - Máy ảo '{vm_name}' chưa tắt hoàn toàn")
+        return False
+
 
 # Singleton instance
 vm_manager = VMManager()

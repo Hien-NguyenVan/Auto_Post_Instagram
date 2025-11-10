@@ -496,26 +496,32 @@ class PostScheduler(threading.Thread):
                         break
 
                 if is_running:
-                    post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - bỏ qua")
-                    post.status = "failed"
-                    self.ui_queue.put(("status_update", post.id, "failed"))
-                    self.running_posts.discard(post.id)
-                    save_scheduled_posts(self.posts)
-                    return
+                    # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
+                    post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                else:
+                    # VM chưa chạy → Bật mới
+                    post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
 
             except Exception as e:
                 post.log(f"⚠️ Không thể kiểm tra trạng thái VM: {e}")
-
-            # Start VM
-            post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
-            subprocess.run(
-                [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+                # Nếu lỗi kiểm tra, cố gắng bật VM
+                post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
+                subprocess.run(
+                    [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
 
             # Wait for VM to be fully ready
             post.log(f"⏳ Chờ máy ảo '{post.vm_name}' khởi động hoàn toàn...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=60):
+            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120):
                 post.log(f"⏱️ Timeout - Máy ảo '{post.vm_name}' không khởi động được")
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -529,7 +535,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -543,7 +549,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -573,7 +579,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -588,7 +594,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -605,13 +611,13 @@ class PostScheduler(threading.Thread):
 
             # Wait for VM to be fully ready after reboot
             post.log(f"⏳ Chờ máy ảo khởi động lại hoàn toàn...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=60):
+            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120):
                 post.log(f"⏱️ Timeout - Máy ảo không khởi động lại được")
                 subprocess.run(
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -626,7 +632,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -640,7 +646,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -662,7 +668,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -676,7 +682,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -700,7 +706,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -714,7 +720,8 @@ class PostScheduler(threading.Thread):
                 [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+            vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+            post.log(f"✅ Đã tắt máy ảo hoàn toàn")
 
             # Mark as posted
             post.status = "posted"
@@ -733,7 +740,7 @@ class PostScheduler(threading.Thread):
                     [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
-                time.sleep(WAIT_LONG)  # Đợi VM tắt hoàn toàn
+                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
             except:
                 pass
 

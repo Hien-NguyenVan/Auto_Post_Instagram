@@ -491,11 +491,14 @@ class Stream:
                                 logger.exception("Error checking VM status")
                                 is_running = True  # Assume running để skip video
 
-                            # 🧩 2️⃣ Nếu máy ảo đang bật → bỏ qua video
+                            # 🧩 2️⃣ Xử lý trạng thái máy ảo (QUEUE-BASED: Đảm bảo VM ở trạng thái sạch)
                             if is_running:
-                                self.log(f"⚠️ Máy ảo '{vm_name}' đang bật — bỏ qua video {title}")
+                                # VM đang chạy → Reboot để đảm bảo trạng thái sạch
+                                self.log(f"⚠️ Máy ảo '{vm_name}' đang chạy — Reboot để đảm bảo trạng thái sạch")
+                                subprocess.run([LDCONSOLE_EXE, "reboot", "--name", vm_name],
+                                            creationflags=subprocess.CREATE_NO_WINDOW)
                             else:
-                                # ========== BẬT MÁY ẢO ==========
+                                # VM chưa chạy → Bật mới
                                 if self.stop_event.is_set():
                                     break
 
@@ -503,286 +506,289 @@ class Stream:
                                 subprocess.run([LDCONSOLE_EXE, "launch", "--name", vm_name],
                                             creationflags=subprocess.CREATE_NO_WINDOW)
 
-                                # Wait for VM to be fully ready
-                                self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động hoàn toàn...")
-                                if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=60):
-                                    self.log(f"⏱️ Timeout - Máy ảo '{vm_name}' không khởi động được")
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    continue
-
-                                # Wait for ADB to connect
-                                vm_file = os.path.join("data", f"{vm_name}.json")
-                                with open(vm_file, "r", encoding="utf-8") as f:
-                                    vm_info = json.load(f)
-                                port = vm_info.get("port")
-                                adb_device = f"emulator-{port}"
-
-                                if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
-                                    self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}'")
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    continue
-
-                                # ========== TẢI VIDEO (Option 2: Thread + timeout) ==========
-                                if self.stop_event.is_set():
-                                    break
-
-                                self.log(f"📥 Đang tải video: {title}")
-
-                                # Chọn download function dựa vào platform
-                                platform = self.cfg.get("platform", "youtube")
-                                if platform == "tiktok":
-                                    download_func = download_tiktok_direct_url
-                                else:
-                                    download_func = download_video_api
-
-                                success, video_path, reason = self.worker_helper.run_blocking_func(
-                                    download_func,
-                                    url,
-                                    log_callback=lambda msg: self.log(msg),
-                                    timeout=600,  # 10 phút
-                                    check_interval=2
-                                )
-
-                                if not success:
-                                    if reason == "stopped":
-                                        self.log("🛑 Dừng tải video")
-                                        # Tắt máy ảo trước khi break
-                                        self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                        self.worker_helper.run_subprocess(
-                                            [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                            timeout=30
-                                        )
-                                        time.sleep(WAIT_LONG)
-                                        break
-                                    else:
-                                        self.log(f"❌ Không thể tải video: {reason}")
-                                        self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                        self.worker_helper.run_subprocess(
-                                            [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                            timeout=30
-                                        )
-                                        time.sleep(WAIT_LONG)
-                                        self.log(f"✅ Đã tắt máy ảo")
-                                        continue
-
-                                if not video_path or not os.path.exists(video_path):
-                                    self.log(f"❌ File video không tồn tại")
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    # Chờ máy ảo tắt hoàn toàn để tránh race condition
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    continue
-
-                                self.log(f"✅ Đã tải xong: {video_path}")
-                                time.sleep(15)
-
-                                # ========== GỬI FILE (Option 2) ==========
-                                if self.stop_event.is_set():
-                                    if os.path.exists(video_path):
-                                        os.remove(video_path)
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    break
-
-                                self.log(f"📤 Gửi file sang máy ảo")
-                                success, success_push, reason = self.worker_helper.run_blocking_func(
-                                    send_file_api,
-                                    video_path,
-                                    vm_name,
-                                    log_callback=lambda msg: self.log(msg),
-                                    timeout=300,
-                                    check_interval=2
-                                )
-
-                                if not success or not success_push:
-                                    if reason == "stopped":
-                                        self.log("🛑 Dừng gửi file")
-                                    else:
-                                        self.log(f"⚠️ Gửi file thất bại: {reason}")
-
-                                    if os.path.exists(video_path):
-                                        os.remove(video_path)
-
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-
-                                    if reason == "stopped":
-                                        break
-                                    else:
-                                        continue
-
-                                self.log(f"✅ Đã gửi video sang máy ảo")
-                                time.sleep(WAIT_MEDIUM)
-
-                                # ========== REBOOT MÁY ẢO ==========
-                                if self.stop_event.is_set():
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    break
-
-                                self.log(f"🔄 Khởi động lại '{vm_name}'")
-                                self.worker_helper.run_subprocess(
-                                    [LDCONSOLE_EXE, "reboot", "--name", vm_name],
-                                    timeout=60
-                                )
-
-                                # Wait for VM to be fully ready after reboot
-                                self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động lại hoàn toàn...")
-                                if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=60):
-                                    self.log(f"⏱️ Timeout - Máy ảo '{vm_name}' không khởi động lại được")
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    continue
-
-                                # Wait for ADB to reconnect after reboot
-                                if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
-                                    self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}' sau reboot")
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    continue
-
-                                # ========== ĐĂNG BÀI (Option 2) ==========
-                                if self.stop_event.is_set():
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    break
-
-                                self.log(f"📲 Đang đăng video: {title}")
-
-                                vm_file = os.path.join("data", f"{vm_name}.json")
-                                with open(vm_file, "r", encoding="utf-8") as f:
-                                    vm_info = json.load(f)
-                                port = vm_info.get("port")
-                                adb_address = f"emulator-{port}"
-
-                                success, success_post, reason = self.worker_helper.run_blocking_func(
-                                    auto_poster.auto_post,
-                                    vm_name,
-                                    adb_address,
-                                    title,
-                                    timeout=600,
-                                    check_interval=2
-                                )
-
-                                if not success or not success_post:
-                                    if reason == "stopped":
-                                        self.log("🛑 Dừng đăng bài")
-                                    else:
-                                        self.log(f"❌ Lỗi đăng bài: {reason}")
-
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-
-                                    if reason == "stopped":
-                                        break
-                                    else:
-                                        continue
-
-                                self.log(f"✅ Đã đăng thành công: {title}")
-
-                                # ========== XÓA FILE ==========
-                                if self.stop_event.is_set():
-                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                    self.worker_helper.run_subprocess(
-                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                        timeout=30
-                                    )
-                                    time.sleep(WAIT_LONG)
-                                    self.log(f"✅ Đã tắt máy ảo")
-                                    break
-
-                                success, success_delete, reason = self.worker_helper.run_blocking_func(
-                                    clear_dcim,
-                                    adb_address,
-                                    log_callback=lambda msg: self.log(msg),
-                                    timeout=60,
-                                    check_interval=1
-                                )
-
-                                if success and success_delete:
-                                    self.log(f"✅ Xóa thành công")
-                                else:
-                                    self.log(f"⚠️ Xóa file thất bại: {reason}")
-
-                                time.sleep(WAIT_MEDIUM)
-
-                                # ========== TẮT MÁY ẢO ==========
-                                self.log(f"🛑 Tắt máy ảo '{vm_name}'")
+                            # ========== CHỜ MÁY ẢO SẴN SÀNG (Tăng timeout lên 120s) ==========
+                            self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động hoàn toàn...")
+                            if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=120):
+                                self.log(f"⏱️ Timeout 120s - Máy ảo '{vm_name}' không khởi động được")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
                                     [LDCONSOLE_EXE, "quit", "--name", vm_name],
                                     timeout=30
                                 )
-                                time.sleep(WAIT_LONG)
+                                # QUAN TRỌNG: Đợi VM tắt HOÀN TOÀN trước khi release lock
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo hoàn toàn")
+                                continue
 
-                                # ========== CẬP NHẬT TRẠNG THÁI ==========
-                                vid["status"] = "post"
+                            # ========== CHỜ ADB KẾT NỐI ==========
+                            vm_file = os.path.join("data", f"{vm_name}.json")
+                            with open(vm_file, "r", encoding="utf-8") as f:
+                                vm_info = json.load(f)
+                            port = vm_info.get("port")
+                            adb_device = f"emulator-{port}"
 
-                                # ========== UPDATE CUTOFF_DT ==========
-                                try:
-                                    published_iso = vid.get("publishedAt")
-                                    if published_iso:
-                                        video_time = iso_to_datetime(published_iso)
-                                        if video_time > cutoff_dt:
-                                            cutoff_dt = video_time
-                                            self.log(f"📅 Cập nhật cutoff → {cutoff_dt.strftime('%d/%m/%Y %H:%M')}")
-                                except Exception as e:
-                                    self.log(f"⚠️ Không thể cập nhật cutoff_dt: {e}")
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
+                                self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}'")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                # QUAN TRỌNG: Đợi VM tắt HOÀN TOÀN trước khi release lock
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo hoàn toàn")
+                                continue
 
-                                try:
-                                    if os.path.exists(video_path):
-                                        os.remove(video_path)
-                                except Exception as e:
-                                    self.log(f"⚠️ Không thể xóa {video_path}: {e}")
+                            # ========== TẢI VIDEO (Option 2: Thread + timeout) ==========
+                            if self.stop_event.is_set():
+                                break
 
-                                self.log(f"✅ Hoàn tất {title}")
+                            self.log(f"📥 Đang tải video: {title}")
+
+                            # Chọn download function dựa vào platform
+                            platform = self.cfg.get("platform", "youtube")
+                            if platform == "tiktok":
+                                download_func = download_tiktok_direct_url
+                            else:
+                                download_func = download_video_api
+
+                            success, video_path, reason = self.worker_helper.run_blocking_func(
+                                download_func,
+                                url,
+                                log_callback=lambda msg: self.log(msg),
+                                timeout=600,  # 10 phút
+                                check_interval=2
+                            )
+
+                            if not success:
+                                if reason == "stopped":
+                                    self.log("🛑 Dừng tải video")
+                                    # Tắt máy ảo trước khi break
+                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                    break
+                                else:
+                                    self.log(f"❌ Không thể tải video: {reason}")
+                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                    self.log(f"✅ Đã tắt máy ảo hoàn toàn")
+                                    continue
+
+                            if not video_path or not os.path.exists(video_path):
+                                self.log(f"❌ File video không tồn tại")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                # QUAN TRỌNG: Chờ máy ảo tắt hoàn toàn để tránh race condition
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo hoàn toàn")
+                                continue
+
+                            self.log(f"✅ Đã tải xong: {video_path}")
+                            time.sleep(15)
+
+                            # ========== GỬI FILE (Option 2) ==========
+                            if self.stop_event.is_set():
+                                if os.path.exists(video_path):
+                                    os.remove(video_path)
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                break
+
+                            self.log(f"📤 Gửi file sang máy ảo")
+                            success, success_push, reason = self.worker_helper.run_blocking_func(
+                                send_file_api,
+                                video_path,
+                                vm_name,
+                                log_callback=lambda msg: self.log(msg),
+                                timeout=300,
+                                check_interval=2
+                            )
+
+                            if not success or not success_push:
+                                if reason == "stopped":
+                                    self.log("🛑 Dừng gửi file")
+                                else:
+                                    self.log(f"⚠️ Gửi file thất bại: {reason}")
+
+                                if os.path.exists(video_path):
+                                    os.remove(video_path)
+
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo")
+
+                                if reason == "stopped":
+                                    break
+                                else:
+                                    continue
+
+                            self.log(f"✅ Đã gửi video sang máy ảo")
+                            time.sleep(WAIT_MEDIUM)
+
+                            # ========== REBOOT MÁY ẢO ==========
+                            if self.stop_event.is_set():
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                break
+
+                            self.log(f"🔄 Khởi động lại '{vm_name}'")
+                            self.worker_helper.run_subprocess(
+                                [LDCONSOLE_EXE, "reboot", "--name", vm_name],
+                                timeout=60
+                            )
+
+                            # Wait for VM to be fully ready after reboot
+                            self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động lại hoàn toàn...")
+                            if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=120):
+                                self.log(f"⏱️ Timeout 120s - Máy ảo '{vm_name}' không khởi động lại được")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo")
+                                continue
+
+                            # Wait for ADB to reconnect after reboot
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
+                                self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}' sau reboot")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo")
+                                continue
+
+                            # ========== ĐĂNG BÀI (Option 2) ==========
+                            if self.stop_event.is_set():
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                break
+
+                            self.log(f"📲 Đang đăng video: {title}")
+
+                            vm_file = os.path.join("data", f"{vm_name}.json")
+                            with open(vm_file, "r", encoding="utf-8") as f:
+                                vm_info = json.load(f)
+                            port = vm_info.get("port")
+                            adb_address = f"emulator-{port}"
+
+                            success, success_post, reason = self.worker_helper.run_blocking_func(
+                                auto_poster.auto_post,
+                                vm_name,
+                                adb_address,
+                                title,
+                                timeout=600,
+                                check_interval=2
+                            )
+
+                            if not success or not success_post:
+                                if reason == "stopped":
+                                    self.log("🛑 Dừng đăng bài")
+                                else:
+                                    self.log(f"❌ Lỗi đăng bài: {reason}")
+
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo")
+
+                                if reason == "stopped":
+                                    break
+                                else:
+                                    continue
+
+                            self.log(f"✅ Đã đăng thành công: {title}")
+
+                            # ========== XÓA FILE ==========
+                            if self.stop_event.is_set():
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                self.log(f"✅ Đã tắt máy ảo")
+                                break
+
+                            success, success_delete, reason = self.worker_helper.run_blocking_func(
+                                clear_dcim,
+                                adb_address,
+                                log_callback=lambda msg: self.log(msg),
+                                timeout=60,
+                                check_interval=1
+                            )
+
+                            if success and success_delete:
+                                self.log(f"✅ Xóa thành công")
+                            else:
+                                self.log(f"⚠️ Xóa file thất bại: {reason}")
+
+                            time.sleep(WAIT_MEDIUM)
+
+                            # ========== TẮT MÁY ẢO ==========
+                            self.log(f"🛑 Tắt máy ảo '{vm_name}'")
+                            self.worker_helper.run_subprocess(
+                                [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                timeout=30
+                            )
+                            vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                            self.log(f"✅ Đã tắt máy ảo hoàn toàn")
+
+                            # ========== CẬP NHẬT TRẠNG THÁI ==========
+                            vid["status"] = "post"
+
+                            # ========== UPDATE CUTOFF_DT ==========
+                            try:
+                                published_iso = vid.get("publishedAt")
+                                if published_iso:
+                                    video_time = iso_to_datetime(published_iso)
+                                    if video_time > cutoff_dt:
+                                        cutoff_dt = video_time
+                                        self.log(f"📅 Cập nhật cutoff → {cutoff_dt.strftime('%d/%m/%Y %H:%M')}")
+                            except Exception as e:
+                                self.log(f"⚠️ Không thể cập nhật cutoff_dt: {e}")
+
+                            try:
+                                if os.path.exists(video_path):
+                                    os.remove(video_path)
+                            except Exception as e:
+                                self.log(f"⚠️ Không thể xóa {video_path}: {e}")
+
+                            self.log(f"✅ Hoàn tất {title}")
 
                         finally:
                             # ========== RELEASE VM LOCK ==========
