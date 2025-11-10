@@ -338,26 +338,26 @@ def parse_iso8601_duration(duration: str) -> int:
 def filter_videos_by_mode(videos: list, mode: str) -> list:
     """
     Lọc video theo độ dài (shorts/long/both)
-    
+
     Args:
         videos: Danh sách video dict (phải có trường 'duration')
-        mode: Chế độ lọc - 'shorts' (<60s), 'long' (>=60s), 'both'
-    
+        mode: Chế độ lọc - 'shorts' (<182s), 'long' (>=182s), 'both'
+
     Returns:
         Danh sách video đã lọc
     """
     if mode == "both":
         return videos
-    
+
     filtered = []
     for video in videos:
         duration_seconds = parse_iso8601_duration(video["duration"])
-        
-        if mode == "shorts" and duration_seconds < 100:
+
+        if mode == "shorts" and duration_seconds < 182:
             filtered.append(video)
-        elif mode == "long" and duration_seconds >= 100:
+        elif mode == "long" and duration_seconds >= 182:
             filtered.append(video)
-    
+
     return filtered
 
 def check_api_key_valid(api_key: str, timeout: int = 10) -> dict:

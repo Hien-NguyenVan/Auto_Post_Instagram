@@ -28,8 +28,22 @@ from utils.post import InstagramPost
 from utils.delete_file import clear_dcim
 from utils.vm_manager import vm_manager
 from utils.api_manager_multi import multi_api_manager
-from utils.yt_api import check_api_key_valid
-from utils.tiktok_api_new import check_tiktok_api_key_valid
+from utils.yt_api import (
+    check_api_key_valid,
+    extract_channel_id,
+    get_uploads_playlist_id,
+    iter_playlist_videos_newer_than,
+    fetch_video_details,
+    filter_videos_by_mode,
+    iso_to_datetime
+)
+from utils.tiktok_api_new import (
+    check_tiktok_api_key_valid,
+    extract_tiktok_handle,
+    fetch_tiktok_videos,
+    convert_to_output_format
+)
+from utils.download_dlp import download_tiktok_direct_url, download_video_api
 
 
 # ==================== CONSTANTS ====================
@@ -349,14 +363,85 @@ class PostScheduler(threading.Thread):
                 save_scheduled_posts(self.posts)
                 return
 
-            # Check if video file exists
-            if not os.path.exists(post.video_path):
-                post.log(f"❌ File video không tồn tại: {post.video_path}")
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
+            # Check if video_path is a URL or local file
+            is_url = post.video_path.startswith("http")
+            temp_video_path = None
+
+            if is_url:
+                # Detect platform from URL
+                # If contains youtube.com or youtu.be -> YouTube
+                # Otherwise -> TikTok (default)
+                is_youtube = "youtube.com" in post.video_path or "youtu.be" in post.video_path
+
+                if is_youtube:
+                    # Download YouTube video
+                    post.log(f"📥 Đang tải video YouTube từ URL...")
+                    try:
+                        video_path = download_video_api(
+                            post.video_path,
+                            log_callback=lambda msg: post.log(msg)
+                        )
+
+                        if not video_path or not os.path.exists(video_path):
+                            post.log(f"❌ Không thể tải video YouTube")
+                            post.status = "failed"
+                            self.ui_queue.put(("status_update", post.id, "failed"))
+                            self.running_posts.discard(post.id)
+                            save_scheduled_posts(self.posts)
+                            return
+
+                        post.log(f"✅ Đã tải video YouTube: {os.path.basename(video_path)}")
+                        temp_video_path = video_path  # Mark for cleanup later
+                        post.video_path = video_path  # Update to local path
+
+                    except Exception as e:
+                        post.log(f"❌ Lỗi khi tải video YouTube: {e}")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        return
+
+                else:
+                    # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
+                    post.log(f"📥 Đang tải video TikTok từ URL...")
+                    try:
+                        video_path = download_tiktok_direct_url(
+                            post.video_path,
+                            log_callback=lambda msg: post.log(msg)
+                        )
+
+                        if not video_path or not os.path.exists(video_path):
+                            post.log(f"❌ Không thể tải video TikTok")
+                            post.status = "failed"
+                            self.ui_queue.put(("status_update", post.id, "failed"))
+                            self.running_posts.discard(post.id)
+                            save_scheduled_posts(self.posts)
+                            return
+
+                        post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
+                        temp_video_path = video_path  # Mark for cleanup later
+                        post.video_path = video_path  # Update to local path
+
+                    except Exception as e:
+                        post.log(f"❌ Lỗi khi tải video TikTok: {e}")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        return
+
+                time.sleep(WAIT_SHORT)
+
+            else:
+                # Check if local video file exists
+                if not os.path.exists(post.video_path):
+                    post.log(f"❌ File video không tồn tại: {post.video_path}")
+                    post.status = "failed"
+                    self.ui_queue.put(("status_update", post.id, "failed"))
+                    self.running_posts.discard(post.id)
+                    save_scheduled_posts(self.posts)
+                    return
 
             # Get VM info
             vm_file = os.path.join(DATA_DIR, f"{post.vm_name}.json")
@@ -627,6 +712,14 @@ class PostScheduler(threading.Thread):
                 vm_manager.release_vm(post.vm_name, caller=f"Post:{post.title[:20]}")
                 post.log(f"🔓 Đã giải phóng máy ảo '{post.vm_name}'")
 
+            # ========== CLEANUP TEMP FILE ==========
+            if temp_video_path and os.path.exists(temp_video_path):
+                try:
+                    os.remove(temp_video_path)
+                    post.log(f"🗑️ Đã xóa file temp: {os.path.basename(temp_video_path)}")
+                except Exception as e:
+                    post.log(f"⚠️ Không thể xóa file temp: {e}")
+
             self.running_posts.discard(post.id)
             save_scheduled_posts(self.posts)
 
@@ -667,6 +760,14 @@ class PostTab(ttk.Frame):
             text="📂 Nhập Folder",
             command=self.import_folder,
             bootstyle="info",
+            width=16
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
+            text="📺 Nhập kênh",
+            command=self.import_channel,
+            bootstyle="primary",
             width=16
         ).pack(side=tk.LEFT, padx=3)
 
@@ -797,6 +898,336 @@ class PostTab(ttk.Frame):
                 self.add_posts_from_files(files)
             else:
                 messagebox.showinfo("Thông báo", "Không tìm thấy video nào trong folder")
+
+    def import_channel(self):
+        """Import videos from YouTube or TikTok channel"""
+        # Dialog to select platform and input channel URL
+        dialog = tk.Toplevel(self)
+        dialog.title("Nhập kênh YouTube/TikTok")
+        dialog.geometry("600x400")
+        dialog.grab_set()
+
+        # Header
+        ttk.Label(
+            dialog,
+            text="📺 Nhập kênh YouTube hoặc TikTok",
+            font=("Segoe UI", 12, "bold")
+        ).pack(pady=(20, 10))
+
+        # Platform selection
+        platform_frame = ttk.Labelframe(dialog, text="Chọn nền tảng", padding=10)
+        platform_frame.pack(padx=20, pady=10, fill="x")
+
+        platform_var = tk.StringVar(value="youtube")
+
+        ttk.Radiobutton(
+            platform_frame,
+            text="📺 YouTube",
+            variable=platform_var,
+            value="youtube"
+        ).pack(side="left", padx=20)
+
+        ttk.Radiobutton(
+            platform_frame,
+            text="🎵 TikTok",
+            variable=platform_var,
+            value="tiktok"
+        ).pack(side="left", padx=20)
+
+        # Example label (updates based on platform)
+        example_label = ttk.Label(
+            dialog,
+            text="",
+            font=("Segoe UI", 9),
+            foreground="gray"
+        )
+        example_label.pack(pady=5)
+
+        # Input frame
+        input_frame = ttk.Frame(dialog)
+        input_frame.pack(padx=20, pady=10, fill="x")
+
+        ttk.Label(input_frame, text="Link kênh:", width=12).pack(side="left")
+        entry_url = ttk.Entry(input_frame, width=50, font=("Segoe UI", 10))
+        entry_url.pack(side="left", padx=5, fill="x", expand=True)
+
+        # YouTube video count frame (only shown for YouTube)
+        count_frame = ttk.Frame(dialog)
+        count_frame.pack(padx=20, pady=5, fill="x")
+
+        ttk.Label(count_frame, text="Số lượng video:", width=12).pack(side="left")
+        entry_count = ttk.Spinbox(count_frame, from_=1, to=100, width=10)
+        entry_count.set(20)
+        entry_count.pack(side="left", padx=5)
+
+        ttk.Label(
+            count_frame,
+            text="(Lấy N video mới nhất)",
+            font=("Segoe UI", 9),
+            foreground="gray"
+        ).pack(side="left", padx=5)
+
+        # YouTube filter frame (only shown for YouTube)
+        filter_frame = ttk.Frame(dialog)
+        filter_frame.pack(padx=20, pady=5, fill="x")
+
+        ttk.Label(filter_frame, text="Loại video:", width=12).pack(side="left")
+
+        mode_var = tk.StringVar(value="both")
+
+        ttk.Radiobutton(
+            filter_frame,
+            text="📱 Shorts (<182s)",
+            variable=mode_var,
+            value="shorts"
+        ).pack(side="left", padx=5)
+
+        ttk.Radiobutton(
+            filter_frame,
+            text="🎬 Long (≥182s)",
+            variable=mode_var,
+            value="long"
+        ).pack(side="left", padx=5)
+
+        ttk.Radiobutton(
+            filter_frame,
+            text="🎯 Cả 2",
+            variable=mode_var,
+            value="both"
+        ).pack(side="left", padx=5)
+
+        # Status label
+        status_label = ttk.Label(dialog, text="", foreground="blue")
+        status_label.pack(pady=10)
+
+        # Update UI based on platform selection
+        def on_platform_change(*args):
+            if platform_var.get() == "youtube":
+                example_label.config(text="Ví dụ: https://www.youtube.com/@channelname hoặc https://www.youtube.com/c/channelname")
+                count_frame.pack(padx=20, pady=5, fill="x")
+                filter_frame.pack(padx=20, pady=5, fill="x")
+            else:
+                example_label.config(text="Ví dụ: https://www.tiktok.com/@tiin.vn")
+                count_frame.pack_forget()
+                filter_frame.pack_forget()
+
+        platform_var.trace_add("write", on_platform_change)
+        on_platform_change()  # Initial update
+
+        entry_url.focus()
+
+        result = {"ok": False, "videos": [], "platform": ""}
+
+        def on_fetch():
+            url = entry_url.get().strip()
+            if not url:
+                messagebox.showerror("Lỗi", "Vui lòng nhập link kênh!", parent=dialog)
+                return
+
+            platform = platform_var.get()
+
+            try:
+                if platform == "youtube":
+                    # ========== YOUTUBE ==========
+                    # Check YouTube API key
+                    youtube_key = multi_api_manager.get_next_youtube_key()
+                    if not youtube_key:
+                        messagebox.showerror(
+                            "Lỗi",
+                            "❌ Không có YouTube API key!\n\n"
+                            "Vui lòng thêm YouTube API key trong:\n"
+                            "🔑 Quản lý API → Tab YouTube API",
+                            parent=dialog
+                        )
+                        return
+
+                    # Get video count
+                    try:
+                        video_count = int(entry_count.get())
+                        if video_count < 1:
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror("Lỗi", "Số lượng video phải >= 1", parent=dialog)
+                        return
+
+                    status_label.config(text=f"⏳ Đang quét kênh YouTube...", foreground="blue")
+                    dialog.update()
+
+                    # Extract channel ID
+                    channel_id = extract_channel_id(url, multi_api_manager)
+                    uploads_playlist_id = get_uploads_playlist_id(channel_id, multi_api_manager)
+
+                    # Get latest videos (no time filter, just get N newest)
+                    from datetime import datetime, timezone
+                    very_old_time = datetime(2000, 1, 1, tzinfo=timezone.utc)  # Get all videos since 2000
+
+                    video_ids = []
+                    for vid_id, pub_time in iter_playlist_videos_newer_than(uploads_playlist_id, very_old_time, multi_api_manager):
+                        video_ids.append(vid_id)
+                        if len(video_ids) >= video_count:
+                            break
+
+                    if not video_ids:
+                        status_label.config(text="❌ Không tìm thấy video nào", foreground="red")
+                        messagebox.showwarning(
+                            "Không có video",
+                            f"Không tìm thấy video nào từ kênh này",
+                            parent=dialog
+                        )
+                        return
+
+                    # Fetch video details
+                    status_label.config(text=f"⏳ Đang lấy thông tin {len(video_ids)} video...", foreground="blue")
+                    dialog.update()
+
+                    videos = fetch_video_details(video_ids, multi_api_manager)
+
+                    # Filter by mode (shorts/long/both)
+                    mode = mode_var.get()
+                    videos = filter_videos_by_mode(videos, mode)
+
+                    # Filter: only keep videos with valid URL
+                    valid_videos = [v for v in videos if v.get("url")]
+
+                    if not valid_videos:
+                        status_label.config(text="❌ Không có video hợp lệ", foreground="red")
+
+                        mode_text = {
+                            "shorts": "Shorts (<182s)",
+                            "long": "Long (≥182s)",
+                            "both": "tất cả"
+                        }.get(mode, mode)
+
+                        messagebox.showwarning(
+                            "Không có video hợp lệ",
+                            f"Tìm thấy {len(video_ids)} video nhưng không có video {mode_text} nào có URL hợp lệ.",
+                            parent=dialog
+                        )
+                        return
+
+                    status_label.config(
+                        text=f"✅ Tìm thấy {len(valid_videos)} video hợp lệ",
+                        foreground="green"
+                    )
+
+                    result["ok"] = True
+                    result["videos"] = valid_videos
+                    result["platform"] = "youtube"
+                    result["channel_name"] = url.split("/")[-1]
+
+                else:
+                    # ========== TIKTOK ==========
+                    # Check TikTok API key
+                    tiktok_key = multi_api_manager.get_next_tiktok_key()
+                    if not tiktok_key:
+                        messagebox.showerror(
+                            "Lỗi",
+                            "❌ Không có TikTok API key!\n\n"
+                            "Vui lòng thêm TikTok API key trong:\n"
+                            "🔑 Quản lý API → Tab TikTok API",
+                            parent=dialog
+                        )
+                        return
+
+                    # Extract handle
+                    handle = extract_tiktok_handle(url)
+                    status_label.config(text=f"⏳ Đang quét kênh @{handle}...", foreground="blue")
+                    dialog.update()
+
+                    # Fetch videos from TikTok (get ALL videos, no time filter)
+                    def log_msg(msg):
+                        status_label.config(text=msg)
+                        dialog.update()
+
+                    all_videos = fetch_tiktok_videos(handle, tiktok_key, log_callback=log_msg)
+
+                    if not all_videos:
+                        status_label.config(text="❌ Không tìm thấy video nào", foreground="red")
+                        messagebox.showwarning(
+                            "Không có video",
+                            f"Không tìm thấy video nào từ kênh @{handle}",
+                            parent=dialog
+                        )
+                        return
+
+                    # Filter: only keep videos with valid URL (no time check)
+                    valid_videos = [v for v in all_videos if v.get("video_url")]
+
+                    if not valid_videos:
+                        status_label.config(text="❌ Không có video hợp lệ", foreground="red")
+                        messagebox.showwarning(
+                            "Không có video hợp lệ",
+                            f"Tìm thấy {len(all_videos)} video nhưng không có video nào có URL hợp lệ.",
+                            parent=dialog
+                        )
+                        return
+
+                    # Convert to output format
+                    converted = convert_to_output_format(valid_videos)
+
+                    status_label.config(
+                        text=f"✅ Tìm thấy {len(converted)} video hợp lệ",
+                        foreground="green"
+                    )
+
+                    result["ok"] = True
+                    result["videos"] = converted
+                    result["platform"] = "tiktok"
+                    result["channel_name"] = handle
+
+                # Wait a bit before closing
+                dialog.after(1000, dialog.destroy)
+
+            except Exception as e:
+                status_label.config(text=f"❌ Lỗi: {e}", foreground="red")
+                messagebox.showerror("Lỗi", f"Không thể lấy video:\n{e}", parent=dialog)
+
+        # Buttons
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=20)
+        ttk.Button(btn_frame, text="✅ Quét kênh", command=on_fetch, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+
+        # Bind Enter key
+        entry_url.bind("<Return>", lambda e: on_fetch())
+
+        dialog.wait_window()
+
+        # Process results
+        if result["ok"] and result["videos"]:
+            videos = result["videos"]
+            platform = result["platform"]
+            channel_name = result.get("channel_name", "channel")
+
+            # Create ScheduledPost for each video
+            new_posts = []
+            for idx, vid in enumerate(videos):
+                post_id = f"{platform}_{channel_name}_{int(time.time() * 1000)}_{idx}"
+
+                # Use video URL as "video_path" (will be downloaded when posting)
+                post = ScheduledPost(
+                    post_id=post_id,
+                    video_path=vid["url"],  # Store video URL
+                    scheduled_time_vn=None,
+                    vm_name=None,
+                    account_display="Chưa chọn",
+                    title=vid["title"][:100],  # Limit title length
+                    status="draft"
+                )
+
+                new_posts.append(post)
+
+            # Add to posts list
+            self.posts.extend(new_posts)
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table()
+
+            platform_display = "YouTube" if platform == "youtube" else "TikTok"
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã thêm {len(new_posts)} video {platform_display} từ {channel_name}\n\n"
+                f"Click vào cột ⚙️ để đặt lịch cho từng video."
+            )
 
     def bulk_schedule(self):
         """Lên lịch hàng loạt cho các video trong table - chỉ áp thời gian"""
