@@ -46,6 +46,9 @@ Thumbs.db
 # Ignore entire data folder - each user has their own VM configs and API keys
 data/
 
+# Temporary data backup during update
+.temp_data_backup/
+
 # PyInstaller spec files
 *.spec
 

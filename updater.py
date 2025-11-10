@@ -272,10 +272,64 @@ class Updater:
             # Proceed with update anyway
             return True
 
+    def backup_user_data(self):
+        """Backup user data folder before update"""
+        data_dir = os.path.join(self.app_dir, "data")
+        temp_data_dir = os.path.join(self.app_dir, ".temp_data_backup")
+
+        try:
+            # Remove old temp backup if exists
+            if os.path.exists(temp_data_dir):
+                shutil.rmtree(temp_data_dir)
+
+            # Backup data folder if exists
+            if os.path.exists(data_dir):
+                print("💾 Đang backup dữ liệu người dùng...")
+                shutil.copytree(data_dir, temp_data_dir)
+                print("✅ Đã backup dữ liệu")
+                return temp_data_dir
+
+            return None
+
+        except Exception as e:
+            print(f"⚠️  Cảnh báo: Không thể backup data: {e}")
+            return None
+
+    def restore_user_data(self, temp_data_dir):
+        """Restore user data folder after update"""
+        if not temp_data_dir or not os.path.exists(temp_data_dir):
+            return
+
+        data_dir = os.path.join(self.app_dir, "data")
+
+        try:
+            print("♻️  Đang khôi phục dữ liệu người dùng...")
+
+            # Remove current data dir if exists (might be from git)
+            if os.path.exists(data_dir):
+                shutil.rmtree(data_dir)
+
+            # Restore from backup
+            shutil.copytree(temp_data_dir, data_dir)
+
+            # Clean up temp backup
+            shutil.rmtree(temp_data_dir)
+
+            print("✅ Đã khôi phục dữ liệu người dùng")
+
+        except Exception as e:
+            print(f"⚠️  Cảnh báo: Không thể restore data: {e}")
+            print(f"   Dữ liệu backup tại: {temp_data_dir}")
+
     def pull_updates(self):
         """Pull latest code from GitHub"""
+        temp_data_backup = None
+
         try:
             print("📥 Đang tải code mới từ GitHub...")
+
+            # IMPORTANT: Backup user data BEFORE any git operations
+            temp_data_backup = self.backup_user_data()
 
             # Step 1: Add all files to Git (including untracked)
             # This prevents "untracked working tree files would be overwritten" error
@@ -315,16 +369,26 @@ class Updater:
                 )
                 if result.returncode != 0:
                     print(f"❌ Lỗi khi pull code: {result.stderr}")
+                    # Restore data even if pull failed
+                    self.restore_user_data(temp_data_backup)
                     return False
 
             print("✅ Đã tải code mới thành công!")
+
+            # IMPORTANT: Restore user data AFTER successful pull
+            self.restore_user_data(temp_data_backup)
+
             return True
 
         except subprocess.TimeoutExpired:
             print("❌ Timeout khi tải code")
+            # Restore data even if timeout
+            self.restore_user_data(temp_data_backup)
             return False
         except Exception as e:
             print(f"❌ Lỗi: {e}")
+            # Restore data even if error
+            self.restore_user_data(temp_data_backup)
             return False
 
     def install_dependencies(self):
