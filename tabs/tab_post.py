@@ -503,7 +503,24 @@ class PostScheduler(threading.Thread):
                 [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            time.sleep(WAIT_EXTRA_LONG)
+
+            # Wait for VM to be fully ready after reboot
+            post.log(f"⏳ Chờ máy ảo khởi động lại hoàn toàn...")
+            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=60):
+                post.log(f"⏱️ Timeout - Máy ảo không khởi động lại được")
+                subprocess.run(
+                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                post.status = "failed"
+                self.ui_queue.put(("status_update", post.id, "failed"))
+                self.running_posts.discard(post.id)
+                save_scheduled_posts(self.posts)
+                return
+
+            # Wait a bit more for ADB to reconnect after reboot
+            post.log(f"⏳ Chờ ADB kết nối lại...")
+            time.sleep(WAIT_MEDIUM)
 
             # Check stop request after reboot
             if post.stop_requested:

@@ -610,7 +610,20 @@ class Stream:
                                     [LDCONSOLE_EXE, "reboot", "--name", vm_name],
                                     timeout=60
                                 )
-                                time.sleep(WAIT_LONG)
+
+                                # Wait for VM to be fully ready after reboot
+                                self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động lại hoàn toàn...")
+                                if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=60):
+                                    self.log(f"⏱️ Timeout - Máy ảo '{vm_name}' không khởi động lại được")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    continue
+
+                                # Wait a bit more for ADB to reconnect after reboot
+                                self.log(f"⏳ Chờ ADB kết nối lại...")
+                                time.sleep(WAIT_MEDIUM)
 
                                 # ========== ĐĂNG BÀI (Option 2) ==========
                                 if self.stop_event.is_set():
