@@ -105,7 +105,7 @@ class InstagramLogin(BaseInstagramAutomation):
 
             # Open Instagram app
             self.log(vm_name, "📱 Mở ứng dụng Instagram...")
-            if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=WAIT_LONG, vm_name=vm_name):
+            if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=30, vm_name=vm_name):
                 self.log(vm_name, "❌ Không tìm thấy app Instagram", "ERROR")
                 return False
 
@@ -134,22 +134,16 @@ class InstagramLogin(BaseInstagramAutomation):
                 self.log(vm_name, "❌ Không tìm thấy nút Log in", "ERROR")
                 return False
 
-            # Click "Try another way"
+            # Click "Try another way nếu có"
             self.log(vm_name, "🔄 Chọn Try another way...")
-            if not self.safe_click(d, XPATH_TRY_ANOTHER_WAY, sleep_after=WAIT_SHORT, vm_name=vm_name):
-                self.log(vm_name, "❌ Không tìm thấy nút Try another way", "ERROR")
-                return False
-
-            # Select "Authentication app"
+            self.safe_click(d, XPATH_TRY_ANOTHER_WAY, sleep_after=WAIT_SHORT, vm_name=vm_name)
+                
+            # Select "Authentication app nếu có"
             self.log(vm_name, "📱 Chọn Authentication app...")
-            if not self.safe_click(d, XPATH_AUTH_APP, sleep_after=WAIT_SHORT, vm_name=vm_name):
-                self.log(vm_name, "❌ Không tìm thấy 'Authentication app'", "ERROR")
-                return False
+            self.safe_click(d, XPATH_AUTH_APP, sleep_after=WAIT_SHORT, vm_name=vm_name)
 
             # Click Continue
-            if not self.safe_click(d, XPATH_CONTINUE_BUTTON, sleep_after=WAIT_MEDIUM, vm_name=vm_name):
-                self.log(vm_name, "⚠️ Không tìm thấy nút Continue", "WARNING")
-                return False
+            self.safe_click(d, XPATH_CONTINUE_BUTTON, sleep_after=WAIT_MEDIUM, vm_name=vm_name)
 
             # Get 2FA code
             self.log(vm_name, "🔒 Đang lấy mã 2FA...")
