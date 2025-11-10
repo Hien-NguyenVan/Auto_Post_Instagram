@@ -273,20 +273,25 @@ class Updater:
             return True
 
     def backup_user_data(self):
-        """Backup user data folder before update"""
+        """
+        Backup user data folder before update.
+
+        CRITICAL FIX: Backup to PARENT directory (outside git folder)
+        to prevent git operations from deleting the backup.
+        """
         data_dir = os.path.join(self.app_dir, "data")
-        temp_data_dir = os.path.join(self.app_dir, ".temp_data_backup")
+
+        # IMPORTANT: Backup to PARENT folder (outside git)
+        parent_dir = os.path.dirname(self.app_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_data_dir = os.path.join(parent_dir, f".InstagramTool_DATA_BACKUP_{timestamp}")
 
         try:
-            # Remove old temp backup if exists
-            if os.path.exists(temp_data_dir):
-                shutil.rmtree(temp_data_dir)
-
             # Backup data folder if exists
             if os.path.exists(data_dir):
-                print("💾 Đang backup dữ liệu người dùng...")
+                print("💾 Đang backup dữ liệu người dùng ra ngoài folder git...")
                 shutil.copytree(data_dir, temp_data_dir)
-                print("✅ Đã backup dữ liệu")
+                print(f"✅ Đã backup dữ liệu vào: {os.path.basename(temp_data_dir)}")
                 return temp_data_dir
 
             return None
@@ -296,8 +301,13 @@ class Updater:
             return None
 
     def restore_user_data(self, temp_data_dir):
-        """Restore user data folder after update"""
+        """
+        Restore user data folder after update.
+
+        CRITICAL: Always clean up backup folder after restore to save disk space.
+        """
         if not temp_data_dir or not os.path.exists(temp_data_dir):
+            print("⚠️  Không tìm thấy backup để restore")
             return
 
         data_dir = os.path.join(self.app_dir, "data")
@@ -307,19 +317,62 @@ class Updater:
 
             # Remove current data dir if exists (might be from git)
             if os.path.exists(data_dir):
-                shutil.rmtree(data_dir)
+                try:
+                    shutil.rmtree(data_dir)
+                except Exception as e:
+                    print(f"⚠️  Không thể xóa data cũ: {e}")
 
             # Restore from backup
             shutil.copytree(temp_data_dir, data_dir)
-
-            # Clean up temp backup
-            shutil.rmtree(temp_data_dir)
-
             print("✅ Đã khôi phục dữ liệu người dùng")
 
+            # Clean up temp backup (IMPORTANT: Save disk space)
+            try:
+                shutil.rmtree(temp_data_dir)
+                print(f"🗑️  Đã xóa backup tạm: {os.path.basename(temp_data_dir)}")
+            except Exception as e:
+                print(f"⚠️  Không thể xóa backup tạm (bạn có thể xóa thủ công): {temp_data_dir}")
+
         except Exception as e:
-            print(f"⚠️  Cảnh báo: Không thể restore data: {e}")
-            print(f"   Dữ liệu backup tại: {temp_data_dir}")
+            print(f"❌ LỖI NGHIÊM TRỌNG: Không thể restore data!")
+            print(f"   Lỗi: {e}")
+            print(f"   Dữ liệu backup vẫn còn tại: {temp_data_dir}")
+            print(f"   Hãy copy thủ công folder trên vào: {data_dir}")
+
+    def cleanup_old_backups(self):
+        """
+        Clean up old backup folders (older than 7 days) to save disk space.
+
+        Backups are stored in parent directory with pattern:
+        .InstagramTool_DATA_BACKUP_YYYYMMDD_HHMMSS
+        """
+        try:
+            parent_dir = os.path.dirname(self.app_dir)
+            if not os.path.exists(parent_dir):
+                return
+
+            # Find all backup folders
+            backup_pattern = ".InstagramTool_DATA_BACKUP_"
+            now = time.time()
+            seven_days_ago = now - (7 * 24 * 60 * 60)  # 7 days in seconds
+
+            for item in os.listdir(parent_dir):
+                if item.startswith(backup_pattern):
+                    backup_path = os.path.join(parent_dir, item)
+                    if os.path.isdir(backup_path):
+                        # Check if older than 7 days
+                        mtime = os.path.getmtime(backup_path)
+                        if mtime < seven_days_ago:
+                            try:
+                                shutil.rmtree(backup_path)
+                                print(f"🗑️  Đã xóa backup cũ: {item}")
+                            except Exception as e:
+                                # Ignore errors when deleting old backups
+                                pass
+
+        except Exception:
+            # Ignore all errors in cleanup (non-critical)
+            pass
 
     def pull_updates(self):
         """Pull latest code from GitHub"""
@@ -484,6 +537,9 @@ class Updater:
 
         # Step 8: Install dependencies
         self.install_dependencies()
+
+        # Step 9: Clean up old backups (non-critical)
+        self.cleanup_old_backups()
 
         # Get new version after update
         new_version = self.get_current_version()
