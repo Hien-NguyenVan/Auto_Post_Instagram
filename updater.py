@@ -158,6 +158,24 @@ class Updater:
                 pass
         return "unknown"
 
+    def get_remote_version(self):
+        """Get remote version from GitHub"""
+        try:
+            # Fetch the version.txt content from remote
+            result = subprocess.run(
+                ["git", "show", "origin/main:version.txt"],
+                cwd=self.app_dir,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return "unknown"
+        except Exception:
+            return "unknown"
+
     def backup_current_version(self):
         """Create backup of current version"""
         try:
@@ -365,12 +383,23 @@ class Updater:
             self.wait_and_exit(1)
             return
 
-        # Step 3: Check if updates available
-        if not self.check_updates_available():
+        # Step 3: Get remote version
+        remote_ver = self.get_remote_version()
+
+        # Step 4: Check if updates available
+        has_updates = self.check_updates_available()
+
+        if has_updates:
+            print(f"🎯 Phiên bản mới nhất: {remote_ver}")
+            print()
+
+        if not has_updates:
             self.wait_and_exit(0)
             return
 
-        # Step 4: Confirm update
+        # Step 5: Confirm update
+        print()
+        print(f"📦 Cập nhật từ {current_ver} → {remote_ver}")
         print()
         confirm = input("❓ Bạn có muốn cập nhật không? (Y/n): ").strip().lower()
         if confirm and confirm not in ['y', 'yes']:
@@ -378,10 +407,10 @@ class Updater:
             self.wait_and_exit(0)
             return
 
-        # Step 5: Backup current version
+        # Step 6: Backup current version
         self.backup_current_version()
 
-        # Step 6: Pull updates
+        # Step 7: Pull updates
         if not self.pull_updates():
             print()
             print("❌ Cập nhật thất bại!")
@@ -389,8 +418,11 @@ class Updater:
             self.wait_and_exit(1)
             return
 
-        # Step 7: Install dependencies
+        # Step 8: Install dependencies
         self.install_dependencies()
+
+        # Get new version after update
+        new_version = self.get_current_version()
 
         # Success
         print()
@@ -398,7 +430,7 @@ class Updater:
         print("🎉 CẬP NHẬT THÀNH CÔNG!")
         print("=" * 60)
         print()
-        print("✅ Tool đã được cập nhật lên phiên bản mới nhất")
+        print(f"✅ Đã cập nhật từ {current_ver} → {new_version}")
         print("💡 Chạy lại run_tool.bat hoặc main.py để sử dụng phiên bản mới")
         print()
 
