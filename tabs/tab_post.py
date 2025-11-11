@@ -915,6 +915,22 @@ class PostTab(ttk.Frame):
 
         ttk.Button(
             top_bar,
+            text="▶ Chạy tất cả",
+            command=self.run_all_videos,
+            bootstyle="success",
+            width=16
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
+            text="⏸ Dừng tất cả",
+            command=self.stop_all_videos,
+            bootstyle="danger",
+            width=16
+        ).pack(side=tk.LEFT, padx=3)
+
+        ttk.Button(
+            top_bar,
             text="📤 Xuất CSV",
             command=self.export_to_csv,
             bootstyle="secondary",
@@ -2267,11 +2283,9 @@ class PostTab(ttk.Frame):
         """Toggle start/stop cho post"""
         # Không cho phép toggle với draft hoặc posted
         if post.status == "draft":
-            messagebox.showinfo("Thông báo", "Vui lòng cấu hình post trước khi chạy!")
             return
 
         if post.status == "posted":
-            messagebox.showinfo("Thông báo", "Post đã đăng thành công, không thể dừng!")
             return
 
         # Nếu đang processing → yêu cầu dừng ngay lập tức
@@ -2336,10 +2350,69 @@ class PostTab(ttk.Frame):
         save_scheduled_posts(self.posts)
         self.load_posts_to_table()
 
-        if post.is_paused:
-            messagebox.showinfo("Đã dừng", f"Đã dừng post:\n{post.video_name}")
-        else:
-            messagebox.showinfo("Đã chạy", f"Đã kích hoạt post:\n{post.video_name}\n\nSẽ tự động đăng vào: {post.scheduled_time_vn.strftime('%d/%m/%Y %H:%M')}")
+    def run_all_videos(self):
+        """Chạy tất cả video có thể chạy được (không hiện popup)"""
+        started_count = 0
+        now = datetime.now(VN_TZ)
+
+        for post in self.posts:
+            # Bỏ qua các trường hợp không thể chạy
+            if post.status == "draft":
+                continue
+            if post.status == "posted":
+                continue
+            if post.status == "processing":
+                continue
+
+            # Bỏ qua nếu đang chạy rồi
+            if not post.is_paused:
+                continue
+
+            # Kiểm tra thời gian (nếu không phải đăng ngay)
+            if not post.post_now:
+                if post.scheduled_time_vn and post.scheduled_time_vn <= now:
+                    # Thời gian đã qua, bỏ qua
+                    continue
+
+            # Kích hoạt video này
+            if post.post_now:
+                post.scheduled_time_vn = datetime.now(VN_TZ)
+                post.post_now = False
+                post.log("⚡ Đăng ngay - Đã set thời gian = hiện tại (từ 'Chạy tất cả')")
+
+            post.is_paused = False
+            post.log("▶ Đã được kích hoạt từ 'Chạy tất cả'")
+            started_count += 1
+
+        # Lưu và refresh nếu có thay đổi
+        if started_count > 0:
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table()
+
+    def stop_all_videos(self):
+        """Dừng tất cả video đang chạy (không hiện popup)"""
+        stopped_count = 0
+
+        for post in self.posts:
+            # Chỉ dừng video đang chạy (is_paused = False)
+            if post.is_paused:
+                continue
+
+            # Không cho dừng video đang processing hoặc đã posted
+            if post.status == "processing":
+                continue
+            if post.status == "posted":
+                continue
+
+            # Dừng video này
+            post.is_paused = True
+            post.log("⏸ Đã được dừng từ 'Dừng tất cả'")
+            stopped_count += 1
+
+        # Lưu và refresh nếu có thay đổi
+        if stopped_count > 0:
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table()
 
     def edit_post_config(self, post: ScheduledPost):
         """Edit post configuration (VM và thời gian)"""
