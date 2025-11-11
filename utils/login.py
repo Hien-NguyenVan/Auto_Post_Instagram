@@ -253,3 +253,4 @@ class InstagramLogin(BaseInstagramAutomation):
             self.log(vm_name, f"⚠️ Lỗi khi lưu insta_name: {e}", "ERROR")
             self.logger.exception(f"Error saving insta_name to {path}")
             return False
+##test commit

@@ -70,6 +70,7 @@ def find_ldplayer_path():
         r"C:\Program Files (x86)\LDPlayer",
         r"D:\LDPlayer\LDPlayer9",
         r"D:\LDPlayer\LDPlayer4",
+        r"E:\LDPlayer\LDPlayer9",
     ]
 
     for path in common_paths:
