@@ -22,7 +22,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 
 from config import LDCONSOLE_EXE, DATA_DIR, ADB_EXE
-from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG
+from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG, TIMEOUT_MINUTE
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim
@@ -168,7 +168,7 @@ class ScheduledPost:
     """Một post được đặt lịch"""
 
     def __init__(self, post_id, video_path, scheduled_time_vn=None, vm_name=None,
-                 account_display=None, title="", status="draft", is_paused=True, post_now=False):
+                 account_display=None, title="", status="draft", is_paused=True, post_now=False, log_callback=None):
         self.id = post_id
         self.video_path = video_path
         self.video_name = os.path.basename(video_path)
@@ -181,6 +181,7 @@ class ScheduledPost:
         self.post_now = post_now  # True = đăng ngay khi Start
         self.stop_requested = False  # Flag để yêu cầu dừng ngay lập tức
         self.logs = []
+        self.log_callback = log_callback
 
     def to_dict(self):
         return {
@@ -217,11 +218,14 @@ class ScheduledPost:
 
     def log(self, message):
         """Add log message"""
-        timestamp = datetime.now(VN_TZ).strftime("%H:%M:%S")
+        timestamp = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
-        if len(self.logs) > 500:
-            self.logs = self.logs[-500:]
+        if len(self.logs) > 1000:
+            self.logs = self.logs[-1000:]
+        # Gọi callback realtime
+        if self.log_callback:
+            self.log_callback(self.id, log_entry)
 
 
 # ==================== DATA PERSISTENCE ====================
@@ -296,7 +300,7 @@ class PostScheduler(threading.Thread):
         for post in self.posts:
             if post.vm_name == vm_name and post.status == "processing":
                 post.log(message)
-                self.ui_queue.put(("log_update", post.id, message))
+                # Log update được xử lý realtime qua post.log_callback
                 break
 
     def stop(self):
@@ -498,6 +502,21 @@ class PostScheduler(threading.Thread):
                 if is_running:
                     # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
                     post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
+
+                    # Reset ADB server
+                    try:
+                        subprocess.run([ADB_EXE, "kill-server"],
+                                       creationflags=subprocess.CREATE_NO_WINDOW,
+                                       timeout=5)
+                        time.sleep(2)
+                        subprocess.run([ADB_EXE, "start-server"],
+                                       creationflags=subprocess.CREATE_NO_WINDOW,
+                                       timeout=5)
+                        time.sleep(2)
+                        post.log("🔧 Đã reset ADB server")
+                    except Exception as e:
+                        post.log(f"⚠️ Không reset được ADB: {e}")
+
                     subprocess.run(
                         [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
                         creationflags=subprocess.CREATE_NO_WINDOW
@@ -505,6 +524,21 @@ class PostScheduler(threading.Thread):
                 else:
                     # VM chưa chạy → Bật mới
                     post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
+
+                    # Reset ADB server
+                    try:
+                        subprocess.run([ADB_EXE, "kill-server"],
+                                       creationflags=subprocess.CREATE_NO_WINDOW,
+                                       timeout=5)
+                        time.sleep(2)
+                        subprocess.run([ADB_EXE, "start-server"],
+                                       creationflags=subprocess.CREATE_NO_WINDOW,
+                                       timeout=5)
+                        time.sleep(2)
+                        post.log("🔧 Đã reset ADB server")
+                    except Exception as e:
+                        post.log(f"⚠️ Không reset được ADB: {e}")
+
                     subprocess.run(
                         [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
                         creationflags=subprocess.CREATE_NO_WINDOW
@@ -528,7 +562,7 @@ class PostScheduler(threading.Thread):
                 return
 
             # Wait for ADB to connect
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=30):
+            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE):
                 post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
                 post.log(f"🛑 Đang tắt máy ảo...")
                 subprocess.run(
@@ -536,6 +570,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -550,6 +585,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -580,6 +616,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -595,6 +632,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -604,6 +642,21 @@ class PostScheduler(threading.Thread):
 
             # Reboot VM
             post.log(f"🔄 Khởi động lại máy ảo...")
+
+            # Reset ADB server
+            try:
+                subprocess.run([ADB_EXE, "kill-server"],
+                               creationflags=subprocess.CREATE_NO_WINDOW,
+                               timeout=5)
+                time.sleep(2)
+                subprocess.run([ADB_EXE, "start-server"],
+                               creationflags=subprocess.CREATE_NO_WINDOW,
+                               timeout=5)
+                time.sleep(2)
+                post.log("🔧 Đã reset ADB server")
+            except Exception as e:
+                post.log(f"⚠️ Không reset được ADB: {e}")
+
             subprocess.run(
                 [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
                 creationflags=subprocess.CREATE_NO_WINDOW
@@ -618,6 +671,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -625,7 +679,7 @@ class PostScheduler(threading.Thread):
                 return
 
             # Wait for ADB to reconnect after reboot
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=30):
+            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE):
                 post.log(f"⏱️ Timeout - ADB không kết nối lại được sau reboot")
                 post.log(f"🛑 Đang tắt máy ảo...")
                 subprocess.run(
@@ -633,6 +687,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 self.running_posts.discard(post.id)
@@ -647,6 +702,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -669,6 +725,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
@@ -683,6 +740,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -707,6 +765,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
                 post.status = "failed"
                 post.is_paused = True
                 self.ui_queue.put(("status_update", post.id, "failed"))
@@ -721,6 +780,7 @@ class PostScheduler(threading.Thread):
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+            time.sleep(WAIT_EXTRA_LONG)
             post.log(f"✅ Đã tắt máy ảo hoàn toàn")
 
             # Mark as posted
@@ -741,6 +801,7 @@ class PostScheduler(threading.Thread):
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                time.sleep(WAIT_EXTRA_LONG)
             except:
                 pass
 
@@ -774,10 +835,37 @@ class PostTab(ttk.Frame):
         self.scheduler = None
         self.log_windows = {}
 
+        # Set log callback cho tất cả posts
+        for post in self.posts:
+            post.log_callback = self.append_log_line
+
         self.build_ui()
         self.load_posts_to_table()
         self.start_scheduler()
         self.after(200, self.process_ui_queue)
+
+    def append_log_line(self, post_id, line):
+        """Append log line realtime to log window if open"""
+        if hasattr(self, "log_windows") and post_id in self.log_windows:
+            win = self.log_windows[post_id]
+            if win.winfo_exists():
+                txt = win.text_log
+
+                def safe_append():
+                    # Kiểm tra widget còn tồn tại
+                    if not txt.winfo_exists():
+                        return
+                    try:
+                        txt.config(state="normal")
+                        txt.insert("end", line + "\n")
+                        txt.see("end")
+                        txt.config(state="disabled")
+                    except Exception:
+                        # Tránh crash nếu widget bị đóng giữa chừng
+                        pass
+
+                # Thread-safe append
+                win.after(0, safe_append)
 
     def build_ui(self):
         """Build UI components"""
@@ -1277,7 +1365,8 @@ class PostTab(ttk.Frame):
                     vm_name=None,
                     account_display="Chưa chọn",
                     title=vid["title"][:100],  # Limit title length
-                    status="draft"
+                    status="draft",
+                    log_callback=self.append_log_line
                 )
 
                 new_posts.append(post)
@@ -1809,7 +1898,8 @@ class PostTab(ttk.Frame):
                         account_display=None,
                         title=os.path.basename(video_path),
                         status=status if status else "draft",
-                        is_paused=True
+                        is_paused=True,
+                        log_callback=self.append_log_line
                     )
 
                     # Set account_display from VM
@@ -2065,7 +2155,8 @@ class PostTab(ttk.Frame):
                 vm_name=None,
                 account_display="Chưa chọn",
                 title=os.path.splitext(video_name)[0],
-                status="draft"
+                status="draft",
+                log_callback=self.append_log_line
             )
 
             self.posts.append(post)
@@ -2506,11 +2597,12 @@ class PostTab(ttk.Frame):
 
         win = tk.Toplevel(self)
         win.title(f"Log - {post.video_name}")
-        win.geometry("700x400")
+        win.geometry("800x480")
+        win.grab_set()
 
         # Text widget
-        txt = tk.Text(win, wrap="word", state="disabled", bg="#111", fg="#0f0")
-        txt.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        txt = tk.Text(win, wrap="word", state="disabled")
+        txt.pack(fill=tk.BOTH, expand=True)
 
         # Show existing logs
         if post.logs:
@@ -2522,8 +2614,18 @@ class PostTab(ttk.Frame):
         win.text_log = txt
         self.log_windows[post.id] = win
 
-        # Close button
-        ttk.Button(win, text="Đóng", command=win.destroy).pack(pady=5)
+        # Buttons frame
+        btns = tk.Frame(win)
+        btns.pack(fill=tk.X, pady=5)
+
+        def clear_logs():
+            post.logs.clear()
+            txt.config(state="normal")
+            txt.delete("1.0", tk.END)
+            txt.config(state="disabled")
+
+        ttk.Button(btns, text="Xóa lịch sử", command=clear_logs).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Đóng", command=win.destroy).pack(side=tk.RIGHT, padx=4)
 
     def delete_post(self, post: ScheduledPost):
         """Delete a scheduled post"""
@@ -2567,18 +2669,6 @@ class PostTab(ttk.Frame):
                         self.tree.set(post_id, "status", status_icon)
                     except:
                         pass
-
-                elif msg_type == "log_update":
-                    _, post_id, log_msg = msg
-
-                    # Update log window if open
-                    if post_id in self.log_windows and self.log_windows[post_id].winfo_exists():
-                        win = self.log_windows[post_id]
-                        txt = win.text_log
-                        txt.config(state="normal")
-                        txt.insert("end", log_msg + "\n")
-                        txt.see("end")
-                        txt.config(state="disabled")
 
         except:
             pass

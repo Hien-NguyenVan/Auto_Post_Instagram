@@ -32,7 +32,7 @@ from utils.delete_file import clear_dcim
 from utils.vm_manager import vm_manager
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from config import LDCONSOLE_EXE, ADB_EXE
-from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, TIMEOUT_DEFAULT
+from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG, TIMEOUT_DEFAULT, TIMEOUT_MINUTE
 from utils.api_manager_multi import multi_api_manager
 from utils.tiktok_api_new import (
     extract_tiktok_handle,
@@ -495,6 +495,21 @@ class Stream:
                             if is_running:
                                 # VM đang chạy → Reboot để đảm bảo trạng thái sạch
                                 self.log(f"⚠️ Máy ảo '{vm_name}' đang chạy — Reboot để đảm bảo trạng thái sạch")
+
+                                # Reset ADB server
+                                try:
+                                    subprocess.run([ADB_EXE, "kill-server"],
+                                                   creationflags=subprocess.CREATE_NO_WINDOW,
+                                                   timeout=5)
+                                    time.sleep(2)
+                                    subprocess.run([ADB_EXE, "start-server"],
+                                                   creationflags=subprocess.CREATE_NO_WINDOW,
+                                                   timeout=5)
+                                    time.sleep(2)
+                                    self.log("🔧 Đã reset ADB server")
+                                except Exception as e:
+                                    self.log(f"⚠️ Không reset được ADB: {e}")
+
                                 subprocess.run([LDCONSOLE_EXE, "reboot", "--name", vm_name],
                                             creationflags=subprocess.CREATE_NO_WINDOW)
                             else:
@@ -503,6 +518,21 @@ class Stream:
                                     break
 
                                 self.log(f"🚀 Bật máy ảo '{vm_name}' để đăng video: {title}")
+
+                                # Reset ADB server
+                                try:
+                                    subprocess.run([ADB_EXE, "kill-server"],
+                                                   creationflags=subprocess.CREATE_NO_WINDOW,
+                                                   timeout=5)
+                                    time.sleep(2)
+                                    subprocess.run([ADB_EXE, "start-server"],
+                                                   creationflags=subprocess.CREATE_NO_WINDOW,
+                                                   timeout=5)
+                                    time.sleep(2)
+                                    self.log("🔧 Đã reset ADB server")
+                                except Exception as e:
+                                    self.log(f"⚠️ Không reset được ADB: {e}")
+
                                 subprocess.run([LDCONSOLE_EXE, "launch", "--name", vm_name],
                                             creationflags=subprocess.CREATE_NO_WINDOW)
 
@@ -517,6 +547,7 @@ class Stream:
                                 )
                                 # QUAN TRỌNG: Đợi VM tắt HOÀN TOÀN trước khi release lock
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo hoàn toàn")
                                 continue
 
@@ -527,7 +558,7 @@ class Stream:
                             port = vm_info.get("port")
                             adb_device = f"emulator-{port}"
 
-                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE):
                                 self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}'")
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
@@ -536,6 +567,7 @@ class Stream:
                                 )
                                 # QUAN TRỌNG: Đợi VM tắt HOÀN TOÀN trước khi release lock
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo hoàn toàn")
                                 continue
 
@@ -570,6 +602,7 @@ class Stream:
                                         timeout=30
                                     )
                                     vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
                                     break
                                 else:
                                     self.log(f"❌ Không thể tải video: {reason}")
@@ -579,6 +612,7 @@ class Stream:
                                         timeout=30
                                     )
                                     vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
                                     self.log(f"✅ Đã tắt máy ảo hoàn toàn")
                                     continue
 
@@ -591,6 +625,7 @@ class Stream:
                                 )
                                 # QUAN TRỌNG: Chờ máy ảo tắt hoàn toàn để tránh race condition
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo hoàn toàn")
                                 continue
 
@@ -607,6 +642,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 break
 
                             self.log(f"📤 Gửi file sang máy ảo")
@@ -634,6 +670,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo")
 
                                 if reason == "stopped":
@@ -652,9 +689,25 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 break
 
                             self.log(f"🔄 Khởi động lại '{vm_name}'")
+
+                            # Reset ADB server
+                            try:
+                                subprocess.run([ADB_EXE, "kill-server"],
+                                               creationflags=subprocess.CREATE_NO_WINDOW,
+                                               timeout=5)
+                                time.sleep(2)
+                                subprocess.run([ADB_EXE, "start-server"],
+                                               creationflags=subprocess.CREATE_NO_WINDOW,
+                                               timeout=5)
+                                time.sleep(2)
+                                self.log("🔧 Đã reset ADB server")
+                            except Exception as e:
+                                self.log(f"⚠️ Không reset được ADB: {e}")
+
                             self.worker_helper.run_subprocess(
                                 [LDCONSOLE_EXE, "reboot", "--name", vm_name],
                                 timeout=60
@@ -670,11 +723,12 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo")
                                 continue
 
                             # Wait for ADB to reconnect after reboot
-                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30):
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE):
                                 self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}' sau reboot")
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
@@ -682,6 +736,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo")
                                 continue
 
@@ -693,6 +748,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 break
 
                             self.log(f"📲 Đang đăng video: {title}")
@@ -724,6 +780,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo")
 
                                 if reason == "stopped":
@@ -741,6 +798,7 @@ class Stream:
                                     timeout=30
                                 )
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
                                 self.log(f"✅ Đã tắt máy ảo")
                                 break
 
@@ -766,6 +824,7 @@ class Stream:
                                 timeout=30
                             )
                             vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                            time.sleep(WAIT_EXTRA_LONG)
                             self.log(f"✅ Đã tắt máy ảo hoàn toàn")
 
                             # ========== CẬP NHẬT TRẠNG THÁI ==========

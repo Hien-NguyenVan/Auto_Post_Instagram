@@ -11,8 +11,8 @@ def extract_tiktok_handle(url):
     """
     Trích xuất handle từ URL TikTok
 
-    Input: https://www.tiktok.com/@emlacobedamdangcuaanh
-    Output: emlacobedamdangcuaanh
+    Input: https://www.tiktok.com/@tiin.vn
+    Output: tiin.vn
     """
     # Pattern: @handle sau tiktok.com/
     match = re.search(r'tiktok\.com/@([^/?&#]+)', url)
