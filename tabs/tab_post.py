@@ -292,17 +292,9 @@ class PostScheduler(threading.Thread):
         self.ui_queue = ui_queue
         self.stop_event = threading.Event()
         self.logger = logging.getLogger(__name__)
-        self.auto_poster = InstagramPost(log_callback=self.log_callback)
+        # ✅ FIX BUG #5: Không dùng shared auto_poster nữa
+        # Mỗi thread sẽ tạo InstagramPost riêng với post_id specific callback
         self.running_posts = set()  # Track posts being processed
-
-    def log_callback(self, vm_name, message):
-        """Callback from InstagramPost"""
-        # Find the post for this VM and add log
-        for post in self.posts:
-            if post.vm_name == vm_name and post.status == "processing":
-                post.log(message)
-                # Log update được xử lý realtime qua post.log_callback
-                break
 
     def stop(self):
         self.stop_event.set()
@@ -329,6 +321,20 @@ class PostScheduler(threading.Thread):
 
                     # Check if it's time to post
                     if now >= post.scheduled_time_vn:
+                        # ✅ FIX BUG #2: Skip posts quá cũ (quá 10 phút)
+                        time_diff = (now - post.scheduled_time_vn).total_seconds()
+                        max_delay = 600  # 10 phút
+
+                        if time_diff > max_delay:
+                            # Quá cũ, skip và đánh dấu failed
+                            self.logger.warning(f"Post {post.id} quá cũ ({time_diff/60:.1f} phút), bỏ qua")
+                            post.log(f"⏰ Post quá cũ (trễ {time_diff/60:.1f} phút), tự động bỏ qua")
+                            post.status = "failed"
+                            post.is_paused = True
+                            self.ui_queue.put(("status_update", post.id, "failed"))
+                            save_scheduled_posts(self.posts)
+                            continue
+
                         # Start posting in a separate thread
                         self.running_posts.add(post.id)
                         threading.Thread(
@@ -352,7 +358,15 @@ class PostScheduler(threading.Thread):
     def process_post(self, post: ScheduledPost):
         """Process a single scheduled post"""
         vm_acquired = False
+        vm_name_cached = None  # ✅ FIX BUG #4: Cache VM info locally
         try:
+            # ✅ FIX BUG #5: Tạo InstagramPost riêng cho post này với callback dùng post.id
+            def post_specific_log_callback(vm_name, message):
+                """Log callback specific cho post này"""
+                post.log(message)
+
+            auto_poster = InstagramPost(log_callback=post_specific_log_callback)
+
             post.status = "processing"
             post.stop_requested = False  # Reset flag
             post.log(f"🚀 Bắt đầu xử lý post: {post.title}")
@@ -668,7 +682,8 @@ class PostScheduler(threading.Thread):
 
             # Post to Instagram
             post.log(f"📲 Đang đăng video: {post.title}")
-            success = self.auto_poster.auto_post(
+            # ✅ FIX BUG #5: Dùng auto_poster local thay vì shared
+            success = auto_poster.auto_post(
                 post.vm_name, adb_address, post.title,
                 use_launchex=True, ldconsole_exe=LDCONSOLE_EXE
             )
@@ -796,10 +811,19 @@ class PostTab(ctk.CTkFrame):
         self.checked_posts = {}  # Dictionary để lưu trạng thái checkbox {post_id: True/False}
         self.sort_by = "time"  # Mặc định sắp xếp theo thời gian: time, vm, status, name
         self.sort_order = "asc"  # asc = tăng dần, desc = giảm dần
+        self.is_shutting_down = False  # Flag để track shutdown state
 
-        # Set log callback cho tất cả posts
+        # ✅ FIX BUG #1: Reset state khi load app
+        # Khi app restart, force pause tất cả posts để tránh tự động chạy
         for post in self.posts:
+            if post.status in ["pending", "processing"]:
+                post.is_paused = True  # Force pause
+                post.status = "pending"  # Reset về pending
+                self.logger.info(f"Reset post {post.id} to paused state after app restart")
             post.log_callback = self.append_log_line
+
+        # Save lại state đã reset
+        save_scheduled_posts(self.posts)
 
         self.build_ui()
         self.load_posts_to_table()
@@ -3069,8 +3093,126 @@ class PostTab(ctk.CTkFrame):
 
         self.after(200, self.process_ui_queue)
 
+    def cleanup(self):
+        """
+        ✅ Cleanup khi đóng app - Dừng THẬT SỰ tất cả threads và tắt VMs
+        """
+        if self.is_shutting_down:
+            return  # Tránh cleanup nhiều lần
+
+        self.is_shutting_down = True
+        self.logger.info("=" * 50)
+        self.logger.info("🛑 BẮT ĐẦU CLEANUP TAB_POST")
+        self.logger.info("=" * 50)
+
+        try:
+            # 1️⃣ Stop scheduler
+            if self.scheduler and self.scheduler.is_alive():
+                self.logger.info("⏸️ Đang dừng scheduler...")
+                self.scheduler.stop()
+                self.scheduler.join(timeout=5)  # Đợi tối đa 5 giây
+                if self.scheduler.is_alive():
+                    self.logger.warning("⚠️ Scheduler không dừng sau 5 giây")
+                else:
+                    self.logger.info("✅ Scheduler đã dừng")
+
+            # 2️⃣ Set stop_requested cho TẤT CẢ posts đang chạy
+            running_posts = [p for p in self.posts if p.status == "processing"]
+            if running_posts:
+                self.logger.info(f"🛑 Đang dừng {len(running_posts)} posts đang chạy...")
+                for post in running_posts:
+                    post.stop_requested = True
+                    post.is_paused = True
+                    post.status = "pending"  # Reset về pending
+                    self.logger.info(f"   - Dừng post: {post.id} ({post.title})")
+
+            # 3️⃣ Đợi threads kết thúc (timeout 10 giây)
+            self.logger.info("⏳ Đợi threads kết thúc (timeout 10s)...")
+            import time
+            wait_start = time.time()
+            while time.time() - wait_start < 10:
+                if not self.scheduler or not hasattr(self.scheduler, 'running_posts'):
+                    break
+                if len(self.scheduler.running_posts) == 0:
+                    self.logger.info("✅ Tất cả threads đã kết thúc")
+                    break
+                time.sleep(0.5)
+            else:
+                remaining = len(self.scheduler.running_posts) if self.scheduler and hasattr(self.scheduler, 'running_posts') else 0
+                if remaining > 0:
+                    self.logger.warning(f"⚠️ Còn {remaining} threads chưa kết thúc sau 10s")
+
+            # 4️⃣ Tắt TẤT CẢ VMs đang được sử dụng bởi posts
+            self.logger.info("🛑 Đang tắt tất cả VMs...")
+            import subprocess
+            from config import get_ldconsole_path
+
+            # Collect tất cả VMs từ posts
+            vms_to_check = set()
+            for post in self.posts:
+                if post.vm_name:
+                    vms_to_check.add(post.vm_name)
+
+            self.logger.info(f"📋 Kiểm tra {len(vms_to_check)} VMs...")
+
+            # Check từng VM xem có đang chạy không, rồi tắt
+            ldconsole = get_ldconsole_path()
+            if ldconsole and vms_to_check:
+                try:
+                    # List tất cả VMs đang chạy
+                    result = subprocess.run(
+                        [ldconsole, "list2"],
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=10
+                    )
+
+                    running_vms = set()
+                    for line in result.stdout.splitlines():
+                        parts = line.split(",")
+                        if len(parts) >= 5:
+                            vm_name = parts[1].strip()
+                            is_running = (parts[4].strip() == "1")
+                            if is_running and vm_name in vms_to_check:
+                                running_vms.add(vm_name)
+
+                    self.logger.info(f"🔍 Tìm thấy {len(running_vms)} VMs đang chạy: {running_vms}")
+
+                    # Tắt từng VM đang chạy
+                    for vm_name in running_vms:
+                        try:
+                            self.logger.info(f"   🛑 Tắt VM: {vm_name}")
+                            subprocess.run(
+                                [ldconsole, "quit", "--name", vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                timeout=10
+                            )
+                            self.logger.info(f"   ✅ Đã gửi lệnh tắt VM: {vm_name}")
+                        except Exception as e:
+                            self.logger.error(f"   ❌ Lỗi khi tắt VM {vm_name}: {e}")
+
+                    if len(running_vms) > 0:
+                        self.logger.info("⏳ Chờ 3 giây để VMs tắt...")
+                        import time
+                        time.sleep(3)
+
+                except Exception as e:
+                    self.logger.error(f"❌ Lỗi khi check/tắt VMs: {e}")
+
+            # 5️⃣ Save state cuối cùng
+            self.logger.info("💾 Lưu state cuối cùng...")
+            save_scheduled_posts(self.posts)
+            self.logger.info("✅ Đã lưu state")
+
+            self.logger.info("=" * 50)
+            self.logger.info("✅ CLEANUP TAB_POST HOÀN TẤT")
+            self.logger.info("=" * 50)
+
+        except Exception as e:
+            self.logger.exception(f"❌ Lỗi trong cleanup: {e}")
+
     def __del__(self):
         """Cleanup when tab is destroyed"""
-        if self.scheduler:
-            self.scheduler.stop()
+        self.cleanup()
 ##test commit

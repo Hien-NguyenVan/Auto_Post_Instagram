@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.3
+> **Phiên bản hiện tại:** v1.4.5
 
 ---
 
@@ -329,7 +329,25 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.4.3 (2025-11-13) - Current Version
+### v1.4.5 (2025-11-13) - Current Version
+**🔧 Đồng bộ cleanup giữa tab_post và tab_follow**
+- Implement cleanup() method cho FollowTab (critical fix)
+- Fix shared InstagramPost trong tab_follow (tránh log nhầm video)
+- Thêm is_shutting_down flag cho FollowTab
+- Đồng bộ cơ chế cleanup với tab_post
+- Tự động tắt VMs và dừng threads khi đóng app (cả 2 tabs)
+- Đảm bảo luồng độc lập 100% (mỗi video có InstagramPost riêng)
+
+### v1.4.4
+**🐛 Critical Bug Fixes - Tab Post Scheduling**
+- Fix trạng thái không reset khi tắt app
+- Fix video đăng dù đã quá thời gian (skip posts >10 phút)
+- Fix log nhầm video (dùng post_id thay vì vm_name)
+- Implement comprehensive cleanup handler khi đóng app
+- Tự động tắt tất cả VMs và dừng threads khi exit
+- Thread-safe cleanup với timeout protection
+
+### v1.4.3
 **⚡ MediaStore Broadcast & Remove Gallery Dependency**
 - Thêm broadcast `MEDIA_SCANNER_SCAN_FILE` sau khi transfer file
 - Xóa bỏ phần mở Gallery app để refresh media
@@ -396,6 +414,83 @@ with Timer("Operation name"):
 - Bao gồm: Tổng quan, cấu trúc, luồng hoạt động, lịch sử versions
 - Thêm phần changelog để ghi chú các cập nhật tiếp theo
 **Lý do:** Để Claude có thể hiểu nhanh project khi bắt đầu cuộc hội thoại mới, không cần phải explore lại từ đầu
+
+---
+
+### [2025-11-13] - v1.4.5 - Đồng bộ cleanup giữa tab_post và tab_follow
+**File thay đổi:**
+- `tabs/tab_follow.py`
+
+**Nội dung:**
+1. **✅ Implement cleanup() method cho FollowTab**
+   - `app.py` đang gọi `follow_tab.cleanup()` nhưng method không tồn tại!
+   - **Fix:** Thêm comprehensive cleanup() tương tự tab_post:
+     - Stop tất cả streams đang chạy
+     - Đợi threads kết thúc (timeout 10s)
+     - Tắt tất cả VMs đang được dùng
+     - Check VMs đang chạy trước khi tắt (ldconsole list2)
+
+2. **✅ Fix shared InstagramPost trong tab_follow**
+   - Worker method tạo 1 `auto_poster` dùng chung cho tất cả videos
+   - Nếu 2 videos cùng VM → logs có thể nhầm (giống bug #5 trong tab_post)
+   - **Fix:** Mỗi video tạo `InstagramPost` riêng với callback dùng `title`
+
+3. **✅ Thêm is_shutting_down flag**
+   - Tránh cleanup nhiều lần
+   - Consistent với tab_post
+
+**Lý do:**
+- Tab_post đã có cleanup toàn diện (v1.4.4) nhưng tab_follow chưa
+- App.py gọi cleanup() cho cả 2 tabs nhưng follow_tab thiếu method → crash!
+- Shared InstagramPost gây risk log nhầm video
+
+**Impact:**
+- ✅ Đồng bộ: Cả 2 tabs đều cleanup đúng cách khi đóng app
+- ✅ An toàn: Threads dừng thật, VMs tắt thật (follow tab)
+- ✅ Logs chính xác: Mỗi video có InstagramPost riêng
+- ✅ Luồng độc lập 100%: Không còn shared instances
+
+---
+
+### [2025-11-13] - v1.4.4 - Fix critical bugs trong tab_post scheduling
+**File thay đổi:**
+- `tabs/tab_post.py`
+- `core/app.py`
+
+**Bugs đã fix:**
+1. **🐛 Bug #1: Trạng thái không reset khi tắt app**
+   - Posts vẫn ở trạng thái "đang chạy" khi mở lại app
+   - **Fix:** Force reset `is_paused=True` và `status="pending"` cho tất cả posts khi load app
+
+2. **🐛 Bug #2: Video đăng dù đã quá thời gian**
+   - Posts schedule lúc 1h nhưng đến 2h mới mở app vẫn đăng
+   - **Fix:** Skip posts quá cũ hơn 10 phút, tự động đánh dấu "failed"
+
+3. **🐛 Bug #5: Log nhầm video**
+   - Log của Video 1 xuất hiện trong log của Video 2 (cùng VM)
+   - **Fix:** Mỗi post thread tạo `InstagramPost` riêng với callback dùng `post.id` thay vì `vm_name`
+
+4. **🔥 Critical: Cleanup khi đóng app**
+   - Đóng app không dừng threads, VMs vẫn chạy
+   - **Fix:** Implement comprehensive cleanup handler:
+     - Stop scheduler gracefully
+     - Set `stop_requested` cho tất cả running posts
+     - Đợi threads kết thúc (timeout 10s)
+     - Tắt TẤT CẢ VMs đang chạy
+     - Save state cuối cùng
+   - Register `WM_DELETE_WINDOW` protocol trong `app.py`
+
+**Improvements:**
+- 🛡️ Thread-safe cleanup với timeout protection
+- 🔍 Check VMs đang chạy trước khi tắt (dùng `ldconsole list2`)
+- 📝 Detailed logging cho troubleshooting
+- 💾 Save state đúng cách trước khi tắt
+
+**Impact:**
+- ✅ An toàn hơn: User không bị "bất ngờ" khi mở lại app
+- ✅ Chính xác hơn: Posts không đăng khi quá cũ
+- ✅ Ổn định hơn: Logs đúng video, không nhầm lẫn
+- ✅ Cleanup đúng: Threads dừng thật, VMs tắt thật
 
 ---
 

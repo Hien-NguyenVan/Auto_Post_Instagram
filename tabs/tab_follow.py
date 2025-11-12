@@ -319,11 +319,10 @@ class Stream:
             default_cutoff_utc = parse_vn_datetime(self.cfg["start_vn"], VN_TZ).astimezone(timezone.utc)
             default_cutoff_iso = datetime_to_iso(default_cutoff_utc)
             cutoff_dt = newest_published_at(self.cfg["out_path"], default_cutoff_iso)
-            
-            auto_poster = InstagramPost(
-                log_callback=lambda vm, msg: self.log(f"[{vm}] {msg}")
-            )
-            
+
+            # ✅ FIX: Không tạo shared auto_poster ở đây
+            # Mỗi video sẽ tạo InstagramPost riêng để tránh log nhầm
+
             # ========== VÒNG LẶP CHÍNH ==========
             while not self.stop_event.is_set():
                 self.log("Bắt đầu quét...")
@@ -718,6 +717,13 @@ class Stream:
                             port = vm_info.get("port")
                             adb_address = f"emulator-{port}"
 
+                            # ✅ FIX: Tạo InstagramPost riêng cho video này với callback dùng title
+                            def video_log_callback(vm, message):
+                                """Log callback specific cho video này"""
+                                self.log(f"[{title[:30]}...] {message}")
+
+                            auto_poster = InstagramPost(log_callback=video_log_callback)
+
                             # Call auto_post with use_launchex=True
                             def post_with_launchex():
                                 return auto_poster.auto_post(
@@ -892,6 +898,7 @@ class FollowTab(ctk.CTkFrame):
         self.ui_queue = queue.Queue()
         self.streams = {}
         self.meta = load_streams_meta()
+        self.is_shutting_down = False  # ✅ Flag để track shutdown state
 
         # Giao diện chính (dùng self thay vì root window)
         self.build_topbar()
@@ -1642,3 +1649,105 @@ class FollowTab(ctk.CTkFrame):
         except queue.Empty:
             pass
         self.after(200, self.process_ui_queue)
+
+    # ---------- CLEANUP KHI ĐÓNG APP ----------
+    def cleanup(self):
+        """
+        ✅ Cleanup khi đóng app - Dừng THẬT SỰ tất cả streams và tắt VMs
+        """
+        if self.is_shutting_down:
+            return  # Tránh cleanup nhiều lần
+
+        self.is_shutting_down = True
+        self.logger.info("=" * 50)
+        self.logger.info("🛑 BẮT ĐẦU CLEANUP TAB_FOLLOW")
+        self.logger.info("=" * 50)
+
+        try:
+            # 1️⃣ Stop tất cả streams đang chạy
+            running_streams = [(name, stream) for name, stream in self.streams.items()
+                              if hasattr(stream, 'thread') and stream.thread and stream.thread.is_alive()]
+
+            if running_streams:
+                self.logger.info(f"🛑 Đang dừng {len(running_streams)} streams...")
+                for name, stream in running_streams:
+                    self.logger.info(f"   - Dừng stream: {name}")
+                    try:
+                        stream.stop()
+                    except Exception as e:
+                        self.logger.error(f"   ❌ Lỗi stop stream {name}: {e}")
+
+            # 2️⃣ Đợi threads kết thúc (timeout 10s)
+            self.logger.info("⏳ Đợi threads kết thúc (timeout 10s)...")
+            import time
+            for name, stream in running_streams:
+                if stream.thread:
+                    stream.thread.join(timeout=10)
+                    if stream.thread.is_alive():
+                        self.logger.warning(f"   ⚠️ Stream {name} không dừng sau 10s")
+                    else:
+                        self.logger.info(f"   ✅ Stream {name} đã dừng")
+
+            # 3️⃣ Tắt tất cả VMs đang được dùng bởi streams
+            self.logger.info("🛑 Đang tắt tất cả VMs...")
+            vms_to_check = set()
+            for stream in self.streams.values():
+                vm_name = stream.cfg.get("vm_name")
+                if vm_name:
+                    vms_to_check.add(vm_name)
+
+            self.logger.info(f"📋 Kiểm tra {len(vms_to_check)} VMs...")
+
+            if vms_to_check:
+                import subprocess
+                from config import get_ldconsole_path
+                ldconsole = get_ldconsole_path()
+
+                if ldconsole:
+                    try:
+                        # List tất cả VMs đang chạy
+                        result = subprocess.run(
+                            [ldconsole, "list2"],
+                            capture_output=True,
+                            text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                            timeout=10
+                        )
+
+                        running_vms = set()
+                        for line in result.stdout.splitlines():
+                            parts = line.split(",")
+                            if len(parts) >= 5:
+                                vm_name = parts[1].strip()
+                                is_running = (parts[4].strip() == "1")
+                                if is_running and vm_name in vms_to_check:
+                                    running_vms.add(vm_name)
+
+                        self.logger.info(f"🔍 Tìm thấy {len(running_vms)} VMs đang chạy: {running_vms}")
+
+                        # Tắt từng VM đang chạy
+                        for vm_name in running_vms:
+                            try:
+                                self.logger.info(f"   🛑 Tắt VM: {vm_name}")
+                                subprocess.run(
+                                    [ldconsole, "quit", "--name", vm_name],
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                    timeout=10
+                                )
+                                self.logger.info(f"   ✅ Đã gửi lệnh tắt VM: {vm_name}")
+                            except Exception as e:
+                                self.logger.error(f"   ❌ Lỗi khi tắt VM {vm_name}: {e}")
+
+                        if len(running_vms) > 0:
+                            self.logger.info("⏳ Chờ 3 giây để VMs tắt...")
+                            time.sleep(3)
+
+                    except Exception as e:
+                        self.logger.error(f"❌ Lỗi khi check/tắt VMs: {e}")
+
+            self.logger.info("=" * 50)
+            self.logger.info("✅ CLEANUP TAB_FOLLOW HOÀN TẤT")
+            self.logger.info("=" * 50)
+
+        except Exception as e:
+            self.logger.exception(f"❌ Lỗi trong cleanup: {e}")
