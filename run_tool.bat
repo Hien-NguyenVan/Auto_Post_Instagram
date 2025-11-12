@@ -22,9 +22,10 @@ if errorlevel 1 (
 )
 
 REM Check if required packages are installed
-python -c "import ttkbootstrap" >nul 2>&1
+echo [INFO] Checking required packages...
+python -c "import customtkinter" >nul 2>&1
 if errorlevel 1 (
-    echo [WARNING] Some Python packages may not be installed.
+    echo [WARNING] customtkinter is not installed.
     echo.
     echo Installing required packages...
     echo.
@@ -37,6 +38,21 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
+    echo.
+    echo [SUCCESS] Packages installed successfully!
+    echo.
+)
+
+REM Verify customtkinter is now available
+python -c "import customtkinter" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] customtkinter still not available after installation!
+    echo.
+    echo Please try manually:
+    echo   pip install customtkinter>=5.2.0
+    echo.
+    pause
+    exit /b 1
 )
 
 REM Launch the application

@@ -17,3 +17,6 @@ ttkbootstrap>=1.10.1
 
 # CustomTkinter for modern Windows 11 style UI
 customtkinter>=5.2.0
+
+# System and process utilities for diagnostics
+psutil>=5.9.0
