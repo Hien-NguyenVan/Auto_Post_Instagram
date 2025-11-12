@@ -699,29 +699,6 @@ class Stream:
                             self.log(f"✅ Đã gửi video sang máy ảo")
                             time.sleep(WAIT_MEDIUM)
 
-                            # ========== MỞ GALLERY ĐỂ REFRESH THƯ VIỆN ẢNH ==========
-                            if self.stop_event.is_set():
-                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                self.worker_helper.run_subprocess(
-                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                    timeout=30
-                                )
-                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
-                                time.sleep(WAIT_EXTRA_LONG)
-                                break
-
-                            self.log(f"📸 Mở Gallery để refresh thư viện ảnh...")
-                            try:
-                                self.worker_helper.run_subprocess(
-                                    [LDCONSOLE_EXE, "launchex", "--name", vm_name,
-                                     "--packagename", "com.android.gallery3d"],
-                                    timeout=10
-                                )
-                                time.sleep(WAIT_MEDIUM)
-                                self.log("✅ Đã mở Gallery")
-                            except Exception as e:
-                                self.log(f"⚠️ Lỗi mở Gallery: {e}")
-
                             # ========== ĐĂNG BÀI ==========
                             if self.stop_event.is_set():
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")

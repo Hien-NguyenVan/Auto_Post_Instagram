@@ -650,21 +650,7 @@ class PostScheduler(threading.Thread):
                 save_scheduled_posts(self.posts)
                 return
 
-            # Open Gallery app to refresh media library
-            post.log(f"📸 Mở Gallery để refresh thư viện ảnh...")
-            try:
-                subprocess.run(
-                    [LDCONSOLE_EXE, "launchex", "--name", post.vm_name,
-                     "--packagename", "com.android.gallery3d"],
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    timeout=10
-                )
-                time.sleep(WAIT_MEDIUM)
-                post.log("✅ Đã mở Gallery")
-            except Exception as e:
-                post.log(f"⚠️ Lỗi mở Gallery: {e}")
-
-            # Check stop request after opening gallery
+            # Check stop request before posting
             if post.stop_requested:
                 post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
                 subprocess.run(

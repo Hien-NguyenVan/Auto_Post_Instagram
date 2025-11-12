@@ -1,0 +1,539 @@
+# 📋 CLAUDE.MD - Tài liệu Tổng quan Project
+
+> **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
+> **Cập nhật lần cuối:** 2025-11-13
+> **Phiên bản hiện tại:** v1.4.2
+
+---
+
+## 🎯 TỔNG QUAN PROJECT
+
+### Tên Project
+**Instagram Automation Tool** - Công cụ tự động hóa quản lý và đăng bài Instagram
+
+### Mục đích chính
+Tool tự động hóa các thao tác Instagram trên nhiều tài khoản sử dụng LDPlayer (Android Emulator):
+- Quản lý nhiều VM (Virtual Machine) và tài khoản Instagram
+- Đăng bài tự động (video/ảnh) theo lịch
+- Login tự động với hỗ trợ 2FA
+- Download video từ YouTube/TikTok
+- Tự động hóa các thao tác follow, like, comment
+
+### Đặc điểm nổi bật
+- ✅ Giao diện Modern Windows 11 style (CustomTkinter)
+- ✅ Thread-safe: Hỗ trợ đa luồng với VM locking cơ chế
+- ✅ 2FA Integration: Tự động lấy mã 2FA từ API
+- ✅ Auto-detect LDPlayer path
+- ✅ Queue management: Quản lý hàng đợi đăng bài
+- ✅ Diagnostics: Công cụ debug và troubleshoot
+- ✅ Auto-updater: Tự động cập nhật từ GitHub
+
+---
+
+## 💻 CÔNG NGHỆ & DEPENDENCIES
+
+### Core Technologies
+- **Python 3.10+** - Ngôn ngữ chính
+- **CustomTkinter 5.2+** - Modern UI framework (Windows 11 style)
+- **UIAutomator2 2.16+** - Tự động hóa Android UI
+- **LDPlayer** - Android Emulator
+- **ADB** - Android Debug Bridge
+
+### Key Dependencies
+```
+uiautomator2>=2.16.0      # Android automation
+yt-dlp>=2023.10.0         # Video downloader
+requests>=2.31.0          # HTTP requests
+google-api-python-client  # YouTube API
+customtkinter>=5.2.0      # Modern UI
+psutil>=5.9.0             # System diagnostics
+```
+
+### External Services
+- **2FA API:** `https://2fa.live/tok/{key}` - Lấy mã 2FA
+- **GitHub:** Auto-updater từ repository
+- **YouTube/TikTok API:** Download video
+
+---
+
+## 📁 CẤU TRÚC PROJECT
+
+```
+E:\tool_ld\
+│
+├── 🚀 ENTRY POINTS
+│   ├── main.py                  # Entry point chính
+│   ├── run_tool.bat             # Launcher script (Windows)
+│   └── updater.exe              # Auto-updater
+│
+├── 🎨 CORE APPLICATION
+│   └── core/
+│       └── app.py               # Main GUI app (TabView)
+│
+├── 📑 UI TABS (3 tabs chính)
+│   └── tabs/
+│       ├── tab_users.py         # Tab 1: Quản lý VM & Tài khoản
+│       ├── tab_post.py          # Tab 2: Đặt lịch đăng bài
+│       └── tab_follow.py        # Tab 3: Theo dõi & Tự động
+│
+├── 🔧 UTILITIES
+│   └── utils/
+│       ├── vm_manager.py        # Thread-safe VM resource locking
+│       ├── login.py             # Instagram login automation
+│       ├── post.py              # Instagram post automation
+│       ├── download_dlp.py      # YouTube/TikTok downloader
+│       ├── send_file.py         # ADB file transfer to VM
+│       ├── delete_file.py       # 🎯 Clear DCIM/Pictures folders
+│       ├── diagnostics.py       # System diagnostics (v1.4.2)
+│       ├── yt_api.py            # YouTube API integration
+│       └── base_instagram.py   # Base Instagram automation class
+│
+├── ⚙️ CONFIG & CONSTANTS
+│   ├── config.py                # LDPlayer path auto-detection
+│   ├── constants.py             # XPath selectors, timeouts
+│   └── ui_theme.py             # Windows 11 theme colors
+│
+├── 📂 DATA & STORAGE
+│   ├── data/                    # VM configs (*.json files)
+│   ├── downloads/               # Downloaded videos
+│   ├── temp/                    # Temporary files
+│   └── logs/                    # Application logs
+│
+├── 📄 DOCUMENTATION
+│   ├── README.md               # User documentation
+│   ├── DIAGNOSTICS_README.md   # Diagnostics guide
+│   └── claude.md               # This file (dev reference)
+│
+└── 🔨 BUILD & DEPLOY
+    ├── requirements.txt         # Python dependencies
+    └── build_package_simple.py  # Build script
+```
+
+---
+
+## 📝 FILES QUAN TRỌNG & CHỨC NĂNG
+
+### Entry Points
+| File | Chức năng |
+|------|-----------|
+| `main.py` | Entry point chính, khởi tạo UI và start app |
+| `run_tool.bat` | Batch script launcher, check Python, install deps |
+| `updater.exe` | Auto-updater, pull code mới từ GitHub |
+
+### Core Application
+| File | Chức năng |
+|------|-----------|
+| `core/app.py` | Main GUI application với 3 tabs chính |
+
+### UI Tabs
+| File | Chức năng |
+|------|-----------|
+| `tabs/tab_users.py` | Quản lý VM, thêm/xóa account, login automation |
+| `tabs/tab_post.py` | Đặt lịch đăng bài, download video, post queue |
+| `tabs/tab_follow.py` | Tự động follow, like, comment |
+
+### Utilities - Core Functions
+| File | Chức năng |
+|------|-----------|
+| `utils/vm_manager.py` | **Singleton pattern**, thread-safe VM locking, prevent race conditions |
+| `utils/login.py` | Instagram login automation với 2FA support |
+| `utils/post.py` | Instagram post automation (video/image) |
+| `utils/download_dlp.py` | Download video từ YouTube/TikTok bằng yt-dlp |
+| `utils/send_file.py` | Transfer file qua ADB vào VM |
+| `utils/delete_file.py` | 🎯 **Clear DCIM/Pictures folders trước khi post** (v1.4.1) |
+| `utils/diagnostics.py` | System/ADB/VM diagnostics cho debug (v1.4.2) |
+| `utils/yt_api.py` | YouTube API integration |
+| `utils/base_instagram.py` | Base class cho Instagram automation |
+
+### Config & Constants
+| File | Chức năng |
+|------|-----------|
+| `config.py` | Auto-detect LDPlayer path (Registry, ENV, common paths) |
+| `constants.py` | XPath selectors cho Instagram UI, timeouts, intervals |
+| `ui_theme.py` | Windows 11 theme colors (#0078D4 accent) |
+
+---
+
+## 🔄 LUỒNG HOẠT ĐỘNG
+
+### 1️⃣ Instagram Login Flow
+```
+1. Connect to VM via ADB (uiautomator2)
+2. Open Instagram app
+3. Enter username and password
+4. Request 2FA code from API (https://2fa.live/tok/{key})
+5. Enter 2FA code
+6. Click "Save login info"
+7. Retrieve Instagram account name
+8. Save to JSON config
+```
+
+### 2️⃣ Instagram Posting Flow
+```
+1. Download video from YouTube/TikTok (yt-dlp)
+2. Convert to H.264 format if needed (ffmpeg)
+3. 🎯 Clear DCIM and Pictures folders (v1.4.1)
+4. Push video to VM via ADB (send_file.py)
+5. Open Instagram app
+6. Navigate to Create Post (+ button)
+7. Select video from gallery
+8. Add caption
+9. Click "Share" button
+10. Wait for upload confirmation
+11. Close app
+12. Cleanup temporary files
+```
+
+### 3️⃣ VM Resource Locking Flow
+```
+1. Thread requests VM access via vm_manager.acquire_vm(vm_name)
+2. VmResourceManager checks if VM is locked
+3. If locked, wait with timeout
+4. If unlocked, acquire lock and proceed
+5. Thread performs operations on VM
+6. Thread releases lock via vm_manager.release_vm(vm_name)
+7. Other threads can now access the VM
+```
+
+### 4️⃣ Scheduled Posting Flow
+```
+1. User adds posts to queue với scheduled time
+2. Background thread checks queue every minute
+3. When time matches, start posting process
+4. Acquire VM lock (thread-safe)
+5. Execute posting flow
+6. Update queue status (completed/failed)
+7. Release VM lock
+8. Move to next item in queue
+```
+
+---
+
+## 🏗️ KIẾN TRÚC & DESIGN PATTERNS
+
+### Thread Safety - VM Resource Manager
+**File:** `utils/vm_manager.py`
+**Pattern:** Singleton + Threading Locks
+
+```python
+class VmResourceManager:
+    _instance = None  # Singleton
+
+    def __init__(self):
+        self._locks = {}  # Dict of Lock objects per VM
+        self._lock = threading.Lock()  # Global lock
+
+    def acquire_vm(self, vm_name, timeout=300):
+        # Acquire exclusive access to VM
+        # Returns True if successful, False if timeout
+
+    def release_vm(self, vm_name):
+        # Release VM for other threads
+```
+
+**Tại sao cần?**
+- Ngăn chặn nhiều thread truy cập cùng 1 VM đồng thời
+- Tránh race conditions, data corruption
+- Đảm bảo operations chạy tuần tự trên mỗi VM
+
+### Auto-Detection Pattern - LDPlayer Path
+**File:** `config.py`
+
+```python
+def get_ldplayer_path():
+    # 1. Check environment variable LDPLAYER_PATH
+    # 2. Check Windows Registry (HKLM\SOFTWARE\LDPlayer9)
+    # 3. Check common installation paths
+    # 4. Check manual config file (ldplayer_path.txt)
+    # 5. Return path or None
+```
+
+### Observer Pattern - Log Callbacks
+Các functions automation nhận `log_callback` parameter để update UI realtime:
+
+```python
+def login_instagram(device, username, password, key, log_callback=None):
+    if log_callback:
+        log_callback("🔄 Đang mở Instagram...")
+    # ... operations ...
+    if log_callback:
+        log_callback("✅ Login thành công!")
+```
+
+### Strategy Pattern - Video Downloaders
+Support nhiều platforms qua strategy pattern (YouTube, TikTok, etc.)
+
+---
+
+## ⚙️ CẤU HÌNH & SETUP
+
+### 1. LDPlayer Configuration
+Tool tự động detect LDPlayer path qua:
+- Environment variable `LDPLAYER_PATH`
+- Windows Registry: `HKLM\SOFTWARE\LDPlayer9`
+- Common paths: `C:\LDPlayer\LDPlayer9`, `D:\LDPlayer\LDPlayer9`
+- Manual config: `ldplayer_path.txt`
+
+### 2. VM Configuration Storage
+**Location:** `data/<vm_name>.json`
+
+```json
+{
+  "username": "instagram_username",
+  "password": "instagram_password",
+  "two_fa_key": "2FA_SECRET_KEY",
+  "port": 5555,
+  "instagram_name": "@username"
+}
+```
+
+### 3. Constants & XPath Selectors
+**File:** `constants.py`
+- Instagram UI XPath selectors
+- Timeouts (wait_timeout, element_timeout)
+- Intervals (check_interval)
+- Retry logic parameters
+
+### 4. Dependencies Installation
+```bash
+# Auto-install via run_tool.bat
+pip install -r requirements.txt
+```
+
+---
+
+## 🔍 DIAGNOSTICS & DEBUG (v1.4.2)
+
+**File:** `utils/diagnostics.py`
+
+### Available Functions
+```python
+log_system_info()         # RAM, CPU, disk usage
+log_adb_info()            # ADB server status
+log_vm_info(vm_name)      # VM running status, ADB connection
+log_file_info(file_path)  # File existence and size
+run_full_diagnostics()    # Complete system report
+
+# Timer for performance measurement
+with Timer("Operation name"):
+    # ... code to measure ...
+```
+
+### Khi nào dùng?
+- Operations fail không rõ nguyên nhân
+- VM không connect được qua ADB
+- File transfer lỗi
+- Performance issues
+
+---
+
+## 📜 LỊCH SỬ PHIÊN BẢN
+
+### v1.4.2 (2025-11-13) - Current Version
+**✨ Diagnostics Utilities**
+- Thêm comprehensive diagnostic functions cho debugging
+- System diagnostics: RAM, CPU, disk monitoring
+- ADB diagnostics: Server status, device connections
+- VM diagnostics: Running status, ADB connectivity
+- File diagnostics: Existence and size checks
+- Timing utilities: Timer class cho performance measurement
+- Tạo `DIAGNOSTICS_README.md` với usage examples
+
+### v1.4.1
+**🧹 Clear Media Folders**
+- Auto-clear `/sdcard/DCIM/*` và `/sdcard/Pictures/*` trước khi push video
+- Thêm function `clear_pictures()` vào `delete_file.py`
+- Tích hợp vào posting workflows (Tab Post, Tab Follow)
+- Ngăn duplicate media trong Instagram gallery picker
+
+### v1.4.0
+**🚀 Performance & Stability**
+- Major performance improvements
+- Enhanced stability cho concurrent operations
+- Improved error handling
+- Better logging system
+
+### v1.3.7
+**🔒 Critical Fixes**
+- Fixed VM queue race conditions
+- Implemented 100% reliable VM locking mechanism
+- Data loss prevention during updates
+- Enhanced thread safety
+
+### v1.3.6
+**🐛 Bug Fixes**
+- Fixed button states (Run All/Stop All)
+- UI improvements
+
+---
+
+## 📝 CHANGELOG - GHI CHÚ CẬP NHẬT
+
+> **Hướng dẫn:** Mỗi lần chỉnh sửa/cập nhật project, thêm entry mới vào đây với format:
+> ```
+> ### [YYYY-MM-DD] - Tiêu đề cập nhật
+> **File thay đổi:** `path/to/file.py`
+> **Nội dung:**
+> - Mô tả thay đổi 1
+> - Mô tả thay đổi 2
+> **Lý do:** Tại sao cần thay đổi
+> ```
+
+---
+
+### [2025-11-13] - Tạo claude.md
+**File thêm mới:** `claude.md`
+**Nội dung:**
+- Tạo file tài liệu tổng quan toàn bộ project
+- Bao gồm: Tổng quan, cấu trúc, luồng hoạt động, lịch sử versions
+- Thêm phần changelog để ghi chú các cập nhật tiếp theo
+**Lý do:** Để Claude có thể hiểu nhanh project khi bắt đầu cuộc hội thoại mới, không cần phải explore lại từ đầu
+
+---
+
+### [2025-11-13] - Thêm broadcast MediaStore scan & xóa mở Gallery
+**File thay đổi:**
+- `utils/send_file.py`
+- `tabs/tab_post.py`
+- `tabs/tab_follow.py`
+
+**Nội dung:**
+- Thêm cơ chế broadcast `android.intent.action.MEDIA_SCANNER_SCAN_FILE` sau khi gửi file sang VM
+- Xóa bỏ phần mở Gallery app (`com.android.gallery3d`) sau khi gửi file trong `tab_post.py`
+- Xóa bỏ phần mở Gallery app (`com.android.gallery3d`) sau khi gửi file trong `tab_follow.py`
+- MediaStore scan giúp Instagram nhận ra file ngay lập tức mà không cần mở Gallery trước
+
+**Lý do:**
+- Mở Gallery đôi khi vẫn không hiển thị file vừa gửi, gây lỗi khi Instagram chọn media
+- Broadcast scan trực tiếp đảm bảo file được index ngay vào MediaStore
+- Tiết kiệm thời gian và tăng độ tin cậy (không phụ thuộc vào Gallery app)
+
+---
+
+<!-- Thêm các entries mới ở đây -->
+
+---
+
+## ⚠️ TROUBLESHOOTING & TIPS
+
+### Vấn đề thường gặp
+
+#### 1. VM không kết nối được
+**Triệu chứng:** ADB không thấy device
+**Giải pháp:**
+```bash
+# Check ADB server
+adb devices
+
+# Restart ADB server
+adb kill-server
+adb start-server
+
+# Run diagnostics
+python -c "from utils.diagnostics import log_adb_info, log_vm_info; log_adb_info(); log_vm_info('vm_name')"
+```
+
+#### 2. Instagram không mở được
+**Triệu chứng:** App crash hoặc không phản hồi
+**Giải pháp:**
+- Check VM có đủ RAM (tối thiểu 2GB)
+- Clear Instagram cache trong Settings
+- Reinstall Instagram app
+
+#### 3. Video upload fail
+**Triệu chứng:** Upload stuck hoặc error
+**Giải pháp:**
+- Check video format (phải là H.264, MP4)
+- Check video size (Instagram limit 100MB)
+- Đảm bảo DCIM/Pictures đã được clear (v1.4.1)
+- Check disk space trên VM
+
+#### 4. Thread deadlock
+**Triệu chứng:** Operations hang, không progress
+**Giải pháp:**
+- Check VM locks trong `vm_manager`
+- Restart application
+- Check logs trong `logs/app.log`
+
+#### 5. 2FA không lấy được mã
+**Triệu chứng:** Login fail tại bước 2FA
+**Giải pháp:**
+- Check 2FA key có đúng format không
+- Check internet connection
+- Try manual login để verify account
+
+### Performance Tips
+
+1. **Optimize concurrent operations:**
+   - Max 3-4 VMs chạy đồng thời
+   - Mỗi VM cần 2GB RAM
+
+2. **Reduce disk usage:**
+   - Cleanup downloads folder định kỳ
+   - Clear temp files sau mỗi session
+   - Enable auto-cleanup trong settings
+
+3. **Network optimization:**
+   - Use stable internet connection
+   - Avoid VPN if possible (Instagram may flag)
+   - Rate limiting: Max 10 posts/hour per account
+
+### Development Tips
+
+1. **Adding new features:**
+   - Follow existing patterns (Observer, Singleton)
+   - Add proper logging với callbacks
+   - Implement thread-safety nếu cần
+   - Update `constants.py` nếu có XPath mới
+
+2. **Debugging:**
+   - Enable verbose logging
+   - Use diagnostics functions (v1.4.2)
+   - Check `logs/app.log` cho details
+   - Use Timer class để measure performance
+
+3. **Testing:**
+   - Test với 1 VM trước khi scale
+   - Verify thread-safety với multiple VMs
+   - Test error handling và recovery
+   - Check memory leaks với long-running sessions
+
+---
+
+## 🎓 NOTES CHO CLAUDE
+
+### Khi đọc file này:
+1. **Hiểu ngữ cảnh:** Project này dùng để tự động hóa Instagram trên Android emulator
+2. **Thread-safety là critical:** Luôn chú ý VM locking khi modify code
+3. **Check changelog:** Đọc phần changelog để biết recent changes
+4. **Dependencies:** Một số features phụ thuộc external services (2FA API, YouTube API)
+
+### Khi làm việc với project:
+1. **Đọc constants.py trước:** Hiểu XPath selectors và timeouts
+2. **Follow existing patterns:** Observer pattern cho logging, Singleton cho VM manager
+3. **Update changelog:** Mỗi lần modify, thêm entry vào changelog section
+4. **Test thoroughly:** Đặc biệt với threading và concurrent operations
+5. **Preserve user data:** Cẩn thận với data folder, không xóa user configs
+
+### Red Flags - Tránh những điều này:
+❌ Modify VM while locked by another thread
+❌ Skip error handling trong automation flows
+❌ Hardcode paths thay vì dùng config.py
+❌ Remove thread locks để "fix" performance
+❌ Commit sensitive data (passwords, 2FA keys)
+
+---
+
+## 📞 CONTACT & RESOURCES
+
+- **GitHub:** (Repository URL)
+- **Issues:** https://github.com/anthropics/claude-code/issues (Claude Code issues)
+- **LDPlayer Docs:** https://www.ldplayer.net/
+- **UIAutomator2:** https://github.com/openatx/uiautomator2
+- **CustomTkinter:** https://customtkinter.tomschimansky.com/
+
+---
+
+**🔖 End of Document**
+Last updated: 2025-11-13
+Version: v1.4.2

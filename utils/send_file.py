@@ -58,10 +58,29 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
             text=True, encoding="utf-8", errors="ignore",
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
+
         if push.returncode == 0:
+            log(f"✅ Gửi file thành công → {remote_path}")
+
+            # 🔹 5️⃣ Quét lại MediaStore để Gallery/Instagram nhận ra file ngay
+            log(f"🔁 Đang refresh MediaStore...")
+            try:
+                subprocess.run([
+                    adb_path, "-s", device, "shell",
+                    "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                    "-d", f"file://{remote_path}"
+                ],
+                text=True, encoding="utf-8", errors="ignore",
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10
+                )
+                log(f"✅ Đã refresh MediaStore — Instagram sẽ thấy video ngay")
+            except Exception as e:
+                log(f"⚠️ Lỗi khi refresh MediaStore: {e}")
+
             return True
         else:
+            log(f"❌ Gửi file thất bại (mã lỗi {push.returncode})")
             return False
 
     except Exception as e:
