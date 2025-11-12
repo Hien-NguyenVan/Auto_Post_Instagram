@@ -21,8 +21,9 @@ import logging
 from datetime import datetime, timezone, timedelta
 import tkinter as tk
 from tkinter import messagebox, simpledialog
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from tkinter import ttk  # For Treeview only
+import customtkinter as ctk
+from ui_theme import *
 import traceback
 import sys
 from utils.download_dlp import download_video_api, download_tiktok_direct_url
@@ -681,7 +682,7 @@ class Stream:
                             self.log(f"✅ Đã gửi video sang máy ảo")
                             time.sleep(WAIT_MEDIUM)
 
-                            # ========== REBOOT MÁY ẢO ==========
+                            # ========== MỞ GALLERY ĐỂ REFRESH THƯ VIỆN ẢNH ==========
                             if self.stop_event.is_set():
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
@@ -692,55 +693,19 @@ class Stream:
                                 time.sleep(WAIT_EXTRA_LONG)
                                 break
 
-                            self.log(f"🔄 Khởi động lại '{vm_name}'")
-
-                            # Reset ADB server
+                            self.log(f"📸 Mở Gallery để refresh thư viện ảnh...")
                             try:
-                                subprocess.run([ADB_EXE, "kill-server"],
-                                               creationflags=subprocess.CREATE_NO_WINDOW,
-                                               timeout=5)
-                                time.sleep(2)
-                                subprocess.run([ADB_EXE, "start-server"],
-                                               creationflags=subprocess.CREATE_NO_WINDOW,
-                                               timeout=5)
-                                time.sleep(2)
-                                self.log("🔧 Đã reset ADB server")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "launchex", "--name", vm_name,
+                                     "--packagename", "com.android.gallery3d"],
+                                    timeout=10
+                                )
+                                time.sleep(WAIT_MEDIUM)
+                                self.log("✅ Đã mở Gallery")
                             except Exception as e:
-                                self.log(f"⚠️ Không reset được ADB: {e}")
+                                self.log(f"⚠️ Lỗi mở Gallery: {e}")
 
-                            self.worker_helper.run_subprocess(
-                                [LDCONSOLE_EXE, "reboot", "--name", vm_name],
-                                timeout=60
-                            )
-
-                            # Wait for VM to be fully ready after reboot
-                            self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động lại hoàn toàn...")
-                            if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=120):
-                                self.log(f"⏱️ Timeout 120s - Máy ảo '{vm_name}' không khởi động lại được")
-                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                self.worker_helper.run_subprocess(
-                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                    timeout=30
-                                )
-                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
-                                time.sleep(WAIT_EXTRA_LONG)
-                                self.log(f"✅ Đã tắt máy ảo")
-                                continue
-
-                            # Wait for ADB to reconnect after reboot
-                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE):
-                                self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}' sau reboot")
-                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
-                                self.worker_helper.run_subprocess(
-                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
-                                    timeout=30
-                                )
-                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
-                                time.sleep(WAIT_EXTRA_LONG)
-                                self.log(f"✅ Đã tắt máy ảo")
-                                continue
-
-                            # ========== ĐĂNG BÀI (Option 2) ==========
+                            # ========== ĐĂNG BÀI ==========
                             if self.stop_event.is_set():
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
@@ -759,11 +724,15 @@ class Stream:
                             port = vm_info.get("port")
                             adb_address = f"emulator-{port}"
 
+                            # Call auto_post with use_launchex=True
+                            def post_with_launchex():
+                                return auto_poster.auto_post(
+                                    vm_name, adb_address, title,
+                                    use_launchex=True, ldconsole_exe=LDCONSOLE_EXE
+                                )
+
                             success, success_post, reason = self.worker_helper.run_blocking_func(
-                                auto_poster.auto_post,
-                                vm_name,
-                                adb_address,
-                                title,
+                                post_with_launchex,
                                 timeout=600,
                                 check_interval=2
                             )
@@ -920,9 +889,11 @@ class Stream:
             ui_queue.put(("status", self.row_id, self.status))
 
 # ========================= GIAO DIỆN =========================
-class FollowTab(ttk.Frame):
+class FollowTab(ctk.CTkFrame):
+    """Follow Tab - Modern Windows 11 Style"""
+
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.logger = logging.getLogger(__name__)
         self.ui_queue = queue.Queue()
         self.streams = {}
@@ -960,48 +931,88 @@ class FollowTab(ttk.Frame):
 
 
     def build_topbar(self):
-        top = ttk.Frame(self)
-        top.pack(fill=tk.X, padx=10, pady=(10, 5))
+        top = ctk.CTkFrame(self, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        top.pack(fill=tk.X, padx=DIMENSIONS["spacing_lg"], pady=(DIMENSIONS["spacing_lg"], DIMENSIONS["spacing_sm"]))
 
-        self.btn_api = ttk.Button(
+        self.btn_api = ctk.CTkButton(
             top,
             text="🔑 Quản lý API Keys",
             command=self.open_api_manager,
-            bootstyle="warning",
-            width=20
+            **get_button_style("warning"),
+            width=180
         )
-        self.btn_api.pack(side=tk.LEFT, padx=3)
+        self.btn_api.pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Label(
+        ctk.CTkLabel(
             top,
             text="💡 Theo dõi & tự động tải video từ YouTube/TikTok",
-            font=("Segoe UI", 11, "bold"),
-            bootstyle="primary"
-        ).pack(side=tk.LEFT, padx=20)
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["accent"]
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_xl"])
 
-        self.btn_add = ttk.Button(
+        self.btn_add = ctk.CTkButton(
             top,
             text="➕ Thêm luồng mới",
             command=self.open_add_stream_dialog,
-            bootstyle="success",
-            width=18
+            **get_button_style("success"),
+            width=180
         )
-        self.btn_add.pack(side=tk.RIGHT, padx=3)
+        self.btn_add.pack(side=tk.RIGHT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
     def build_table(self):
-        table_container = ttk.Labelframe(self, text="📋 Danh Sách Luồng Theo Dõi", bootstyle="primary")
-        table_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        # Outer container with title
+        outer_frame = ctk.CTkFrame(self, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        outer_frame.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_lg"], pady=(DIMENSIONS["spacing_sm"], DIMENSIONS["spacing_lg"]))
 
-        frame = ttk.Frame(table_container)
-        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Title label
+        title_label = ctk.CTkLabel(
+            outer_frame,
+            text="📋 Danh Sách Luồng Theo Dõi",
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        )
+        title_label.pack(padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_md"], DIMENSIONS["spacing_sm"]), anchor="w")
+
+        # Table container (using ttk.Frame for Treeview)
+        table_container = ctk.CTkFrame(outer_frame, fg_color=COLORS["bg_tertiary"], corner_radius=DIMENSIONS["corner_radius_small"])
+        table_container.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_md"], pady=(0, DIMENSIONS["spacing_md"]))
+
+        frame = tk.Frame(table_container, bg=COLORS["bg_tertiary"])
+        frame.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        # Apply Windows 11 Treeview styling
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure(
+            "Treeview",
+            rowheight=40,
+            font=(FONTS["family"], FONTS["size_normal"]),
+            background=COLORS["bg_secondary"],
+            foreground=COLORS["text_primary"],
+            fieldbackground=COLORS["bg_secondary"],
+            borderwidth=0
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            background=COLORS["surface_3"],
+            foreground=COLORS["text_primary"],
+            borderwidth=1,
+            relief="flat"
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["text_on_accent"])]
+        )
 
         columns = ("stt", "name", "account", "watch", "interval", "status", "run", "stop", "log", "edit", "delete")
 
         self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=10)
 
-        # Configure alternating row colors (striped)
-        self.tree.tag_configure("oddrow", background="#f0f0f0")
-        self.tree.tag_configure("evenrow", background="white")
+        # Configure alternating row colors (striped) - Now using Windows 11 colors
+        self.tree.tag_configure("oddrow", background=COLORS["bg_tertiary"])
+        self.tree.tag_configure("evenrow", background=COLORS["bg_secondary"])
         self.tree.heading("stt", text="STT")
         self.tree.heading("name", text="Tên luồng")
         self.tree.heading("account", text="Tài khoản")
@@ -1275,7 +1286,7 @@ class FollowTab(ttk.Frame):
             # "platform": cfg.get("platform", "youtube"),
             "channels": "",
             "mode": "both",
-            "interval_min": 5,
+            "interval_min": 60,
             "vm_name": "", 
             "account_display": ""
             
@@ -1348,8 +1359,8 @@ class FollowTab(ttk.Frame):
         tk.Label(frm, text="Loại video lấy:").pack(anchor="w")
         mode_var = tk.StringVar(value=init["mode"])
 
-        rd1 = ttk.Radiobutton(frm, text="Lấy Shorts (<60s)", variable=mode_var, value="shorts")
-        rd2 = ttk.Radiobutton(frm, text="Lấy video dài (>=60s)", variable=mode_var, value="long")
+        rd1 = ttk.Radiobutton(frm, text="Lấy Shorts (<182s)", variable=mode_var, value="shorts")
+        rd2 = ttk.Radiobutton(frm, text="Lấy video dài (>=182s)", variable=mode_var, value="long")
         rd3 = ttk.Radiobutton(frm, text="Lấy cả 2", variable=mode_var, value="both")
         rd1.pack(anchor="w"); rd2.pack(anchor="w"); rd3.pack(anchor="w")
 
@@ -1372,8 +1383,8 @@ class FollowTab(ttk.Frame):
         on_platform_change()
 
         # Thời gian quét
-        tk.Label(frm, text="Thời gian quét (phút, 5-1440):").pack(anchor="w")
-        spn_interval = tk.Spinbox(frm, from_=5, to=1440, increment=5)
+        tk.Label(frm, text="Thời gian quét (phút, 60-1440):").pack(anchor="w")
+        spn_interval = tk.Spinbox(frm, from_=60, to=1440, increment=60)
         spn_interval.delete(0, tk.END)
         spn_interval.insert(0, str(init["interval_min"]))
         spn_interval.pack(anchor="w", pady=4)

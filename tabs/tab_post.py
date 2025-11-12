@@ -18,8 +18,9 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 from tkinter import messagebox, filedialog
 import tkinter as tk
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from tkinter import ttk  # For Treeview only
+import customtkinter as ctk
+from ui_theme import *
 
 from config import LDCONSOLE_EXE, DATA_DIR, ADB_EXE
 from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG, TIMEOUT_MINUTE
@@ -640,61 +641,21 @@ class PostScheduler(threading.Thread):
                 save_scheduled_posts(self.posts)
                 return
 
-            # Reboot VM
-            post.log(f"🔄 Khởi động lại máy ảo...")
-
-            # Reset ADB server
+            # Open Gallery app to refresh media library
+            post.log(f"📸 Mở Gallery để refresh thư viện ảnh...")
             try:
-                subprocess.run([ADB_EXE, "kill-server"],
-                               creationflags=subprocess.CREATE_NO_WINDOW,
-                               timeout=5)
-                time.sleep(2)
-                subprocess.run([ADB_EXE, "start-server"],
-                               creationflags=subprocess.CREATE_NO_WINDOW,
-                               timeout=5)
-                time.sleep(2)
-                post.log("🔧 Đã reset ADB server")
+                subprocess.run(
+                    [LDCONSOLE_EXE, "launchex", "--name", post.vm_name,
+                     "--packagename", "com.android.gallery3d"],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+                time.sleep(WAIT_MEDIUM)
+                post.log("✅ Đã mở Gallery")
             except Exception as e:
-                post.log(f"⚠️ Không reset được ADB: {e}")
+                post.log(f"⚠️ Lỗi mở Gallery: {e}")
 
-            subprocess.run(
-                [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-
-            # Wait for VM to be fully ready after reboot
-            post.log(f"⏳ Chờ máy ảo khởi động lại hoàn toàn...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120):
-                post.log(f"⏱️ Timeout - Máy ảo không khởi động lại được")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Wait for ADB to reconnect after reboot
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE):
-                post.log(f"⏱️ Timeout - ADB không kết nối lại được sau reboot")
-                post.log(f"🛑 Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Check stop request after reboot
+            # Check stop request after opening gallery
             if post.stop_requested:
                 post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
                 subprocess.run(
@@ -712,7 +673,10 @@ class PostScheduler(threading.Thread):
 
             # Post to Instagram
             post.log(f"📲 Đang đăng video: {post.title}")
-            success = self.auto_poster.auto_post(post.vm_name, adb_address, post.title)
+            success = self.auto_poster.auto_post(
+                post.vm_name, adb_address, post.title,
+                use_launchex=True, ldconsole_exe=LDCONSOLE_EXE
+            )
 
             if not success:
                 post.log(f"❌ Đăng bài thất bại")
@@ -824,16 +788,19 @@ class PostScheduler(threading.Thread):
 
 
 # ==================== GUI ====================
-class PostTab(ttk.Frame):
-    """Scheduled Post Tab UI"""
+class PostTab(ctk.CTkFrame):
+    """Scheduled Post Tab UI - Modern Windows 11 Style"""
 
     def __init__(self, parent):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.logger = logging.getLogger(__name__)
         self.ui_queue = queue.Queue()
         self.posts = load_scheduled_posts()
         self.scheduler = None
         self.log_windows = {}
+        self.checked_posts = {}  # Dictionary để lưu trạng thái checkbox {post_id: True/False}
+        self.sort_by = "time"  # Mặc định sắp xếp theo thời gian: time, vm, status, name
+        self.sort_order = "asc"  # asc = tăng dần, desc = giảm dần
 
         # Set log callback cho tất cả posts
         for post in self.posts:
@@ -868,106 +835,225 @@ class PostTab(ttk.Frame):
                 win.after(0, safe_append)
 
     def build_ui(self):
-        """Build UI components"""
-        # Top bar with buttons
-        top_bar = ttk.Frame(self)
-        top_bar.pack(fill=tk.X, padx=10, pady=(10, 5))
+        """Build UI components - Modern Windows 11 Style"""
+        # Apply CustomTkinter theme
+        apply_ctk_theme()
 
-        ttk.Button(
-            top_bar,
+        # Container cho tất cả các nút
+        buttons_container = ctk.CTkFrame(self, fg_color="transparent")
+        buttons_container.pack(fill=tk.X, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_md"], DIMENSIONS["spacing_sm"]))
+
+        # ====== HÀNG 1: IMPORT VIDEO ======
+        row1_label = ctk.CTkLabel(
+            buttons_container,
+            text="📥 Import Video",
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        )
+        row1_label.pack(anchor="w", pady=(0, DIMENSIONS["spacing_xs"]))
+
+        row1 = ctk.CTkFrame(buttons_container, **get_frame_style("panel"))
+        row1.pack(fill=tk.X, pady=(0, DIMENSIONS["spacing_sm"]))
+
+        ctk.CTkButton(
+            row1,
             text="📁 Nhập File",
             command=self.import_files,
-            bootstyle="info",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
+            **get_button_style("primary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Button(
-            top_bar,
+        ctk.CTkButton(
+            row1,
             text="📂 Nhập Folder",
             command=self.import_folder,
-            bootstyle="info",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
+            **get_button_style("primary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Button(
-            top_bar,
-            text="📺 Nhập kênh",
+        ctk.CTkButton(
+            row1,
+            text="📺 Nhập từ YouTube/TikTok",
             command=self.import_channel,
-            bootstyle="primary",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
+            **get_button_style("primary"),
+            width=180
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Button(
-            top_bar,
-            text="⚡ Lên lịch hàng loạt",
-            command=self.bulk_schedule,
-            bootstyle="warning",
-            width=18
-        ).pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(
-            top_bar,
-            text="⚙️ Đặt máy ảo hàng loạt",
-            command=self.bulk_assign_vm,
-            bootstyle="success",
-            width=20
-        ).pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(
-            top_bar,
-            text="▶ Chạy tất cả",
-            command=self.run_all_videos,
-            bootstyle="success",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(
-            top_bar,
-            text="⏸ Dừng tất cả",
-            command=self.stop_all_videos,
-            bootstyle="danger",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(
-            top_bar,
-            text="📤 Xuất CSV",
-            command=self.export_to_csv,
-            bootstyle="secondary",
-            width=14
-        ).pack(side=tk.LEFT, padx=3)
-
-        ttk.Button(
-            top_bar,
+        ctk.CTkButton(
+            row1,
             text="📥 Nhập CSV",
             command=self.import_from_csv,
-            bootstyle="secondary",
-            width=14
-        ).pack(side=tk.LEFT, padx=3)
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Button(
-            top_bar,
+        # ====== HÀNG 2: CẤU HÌNH HÀNG LOẠT ======
+        row2_label = ctk.CTkLabel(
+            buttons_container,
+            text="⚙️ Cấu hình hàng loạt",
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        )
+        row2_label.pack(anchor="w", pady=(0, DIMENSIONS["spacing_xs"]))
+
+        row2 = ctk.CTkFrame(buttons_container, **get_frame_style("panel"))
+        row2.pack(fill=tk.X, pady=(0, DIMENSIONS["spacing_sm"]))
+
+        ctk.CTkButton(
+            row2,
+            text="⚡ Lên lịch hàng loạt",
+            command=self.bulk_schedule,
+            **get_button_style("warning"),
+            width=160
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row2,
+            text="⚙️ Đặt máy ảo hàng loạt",
+            command=self.bulk_assign_vm,
+            **get_button_style("success"),
+            width=180
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        # ====== HÀNG 3: ĐIỀU KHIỂN & XUẤT DỮ LIỆU ======
+        row3_label = ctk.CTkLabel(
+            buttons_container,
+            text="🎮 Điều khiển & Xuất dữ liệu",
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        )
+        row3_label.pack(anchor="w", pady=(0, DIMENSIONS["spacing_xs"]))
+
+        row3 = ctk.CTkFrame(buttons_container, **get_frame_style("panel"))
+        row3.pack(fill=tk.X, pady=(0, DIMENSIONS["spacing_sm"]))
+
+        ctk.CTkButton(
+            row3,
+            text="▶ Chạy tất cả",
+            command=self.run_all_videos,
+            **get_button_style("success"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row3,
+            text="⏸ Dừng tất cả",
+            command=self.stop_all_videos,
+            **get_button_style("danger"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row3,
+            text="🗑️ Xóa đã chọn",
+            command=self.delete_selected_videos,
+            **get_button_style("danger"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row3,
+            text="📤 Xuất CSV",
+            command=self.export_to_csv,
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row3,
             text="🔑 Quản lý API",
             command=self.open_api_manager,
-            bootstyle="warning",
-            width=16
-        ).pack(side=tk.LEFT, padx=3)
+            **get_button_style("warning"),
+            width=140
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        ttk.Label(
-            top_bar,
-            text="💡 Đặt lịch đăng video tự động từ PC",
-            font=("Segoe UI", 11, "bold"),
-            bootstyle="primary"
-        ).pack(side=tk.LEFT, padx=20)
+        # ====== FILTER BAR ======
+        filter_bar = ctk.CTkFrame(self, fg_color="transparent")
+        filter_bar.pack(fill=tk.X, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_sm"], 0))
 
-        # Table with labelframe
-        table_container = ttk.Labelframe(self, text="📋 Danh Sách Video Đã Lên Lịch", bootstyle="primary")
-        table_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        ctk.CTkLabel(
+            filter_bar,
+            text="🔍 Sắp xếp theo:",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(side=tk.LEFT, padx=(0, DIMENSIONS["spacing_md"]))
 
-        table_frame = ttk.Frame(table_container)
-        table_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Combobox chọn tiêu chí sắp xếp
+        self.sort_combo = ctk.CTkComboBox(
+            filter_bar,
+            values=["Thời gian đăng", "Máy ảo", "Trạng thái", "Tên video"],
+            command=self.on_sort_change,
+            width=160,
+            corner_radius=DIMENSIONS["corner_radius_medium"],
+            border_color=COLORS["border_medium"],
+            button_color=COLORS["accent"],
+            button_hover_color=COLORS["accent_hover"],
+            fg_color=COLORS["bg_secondary"]
+        )
+        self.sort_combo.set("Thời gian đăng")
+        self.sort_combo.pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"])
 
-        columns = ("stt", "video", "edit", "scheduled_time", "account", "status", "control", "log", "delete")
+        # Nút đổi chiều sắp xếp
+        self.sort_order_btn = ctk.CTkButton(
+            filter_bar,
+            text="⬆️ Tăng dần",
+            command=self.toggle_sort_order,
+            **get_button_style("secondary"),
+            width=120
+        )
+        self.sort_order_btn.pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"])
+
+        # Label hiển thị số lượng video
+        self.count_label = ctk.CTkLabel(
+            filter_bar,
+            text="",
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
+        )
+        self.count_label.pack(side=tk.RIGHT, padx=DIMENSIONS["spacing_md"])
+
+        # ====== TABLE CONTAINER ======
+        table_outer = ctk.CTkFrame(self, fg_color="transparent")
+        table_outer.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_sm"], DIMENSIONS["spacing_md"]))
+
+        # Title for table
+        table_title = ctk.CTkLabel(
+            table_outer,
+            text="📋 Danh Sách Video Đã Lên Lịch",
+            font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        )
+        table_title.pack(anchor="w", pady=(0, DIMENSIONS["spacing_xs"]))
+
+        # Table container with panel style
+        table_container = ctk.CTkFrame(table_outer, **get_frame_style("panel"))
+        table_container.pack(fill=tk.BOTH, expand=True)
+
+        table_frame = ctk.CTkFrame(table_container, fg_color="transparent")
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        # Treeview with ttk (CustomTkinter doesn't have table widget)
+        columns = ("checkbox", "stt", "video", "edit", "scheduled_time", "account", "status", "control", "log", "delete")
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview",
+            background=COLORS["bg_secondary"],
+            foreground=COLORS["text_primary"],
+            fieldbackground=COLORS["bg_secondary"],
+            borderwidth=0,
+            font=(FONTS["family"], FONTS["size_normal"])
+        )
+        style.configure("Treeview.Heading",
+            background=COLORS["surface_3"],
+            foreground=COLORS["text_primary"],
+            borderwidth=1,
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"])
+        )
+        style.map("Treeview",
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["text_on_accent"])]
+        )
 
         self.tree = ttk.Treeview(
             table_frame,
@@ -977,10 +1063,11 @@ class PostTab(ttk.Frame):
         )
 
         # Configure alternating row colors (striped)
-        self.tree.tag_configure("oddrow", background="#f0f0f0")
-        self.tree.tag_configure("evenrow", background="white")
+        self.tree.tag_configure("oddrow", background=COLORS["surface_2"])
+        self.tree.tag_configure("evenrow", background=COLORS["bg_secondary"])
 
         # Headers
+        self.tree.heading("checkbox", text="☐", command=self.toggle_all_checkboxes)
         self.tree.heading("stt", text="STT")
         self.tree.heading("video", text="Tên Video")
         self.tree.heading("edit", text="⚙️")
@@ -992,6 +1079,7 @@ class PostTab(ttk.Frame):
         self.tree.heading("delete", text="Xóa")
 
         # Columns
+        self.tree.column("checkbox", width=40, anchor=tk.CENTER)
         self.tree.column("stt", width=50, anchor=tk.CENTER)
         self.tree.column("video", width=250)
         self.tree.column("edit", width=50, anchor=tk.CENTER)
@@ -1406,77 +1494,108 @@ class PostTab(ttk.Frame):
             messagebox.showinfo("Thông báo", "Không có video nào trong danh sách!")
             return
 
-        # Dialog
-        dialog = tk.Toplevel(self)
+        # Dialog - CustomTkinter style
+        dialog = ctk.CTkToplevel(self)
         dialog.title("Lên lịch hàng loạt")
         dialog.geometry("550x420")
         dialog.grab_set()
+        dialog.configure(fg_color=COLORS["bg_primary"])
 
         # Info
-        ttk.Label(
+        ctk.CTkLabel(
             dialog,
             text=f"⚡ Lên lịch hàng loạt cho video",
-            font=("Segoe UI", 12, "bold")
+            font=(FONTS["family"], FONTS["size_large"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
         ).pack(pady=10)
 
-        ttk.Label(
+        ctk.CTkLabel(
             dialog,
             text="(Máy ảo của mỗi video sẽ được giữ nguyên)",
-            font=("Segoe UI", 9),
-            foreground="gray"
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
         ).pack(pady=2)
 
         # ========== PHẠM VI VIDEO ==========
-        range_frame = ttk.Labelframe(dialog, text="📌 Phạm vi video áp dụng", padding=10)
+        range_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
         range_frame.pack(fill="x", padx=20, pady=(10, 5))
 
+        # Title
+        ctk.CTkLabel(
+            range_frame,
+            text="📌 Phạm vi video áp dụng",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
         # Row: Start and End index
-        index_row = ttk.Frame(range_frame)
-        index_row.pack(fill="x", pady=5)
+        index_row = ctk.CTkFrame(range_frame, fg_color="transparent")
+        index_row.pack(fill="x", padx=10, pady=5)
 
         # Start index
-        ttk.Label(index_row, text="Từ video thứ:", width=15).pack(side="left")
-        entry_start_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
-        entry_start_index.set(1)
+        ctk.CTkLabel(index_row, text="Từ video thứ:", width=110, anchor="w").pack(side="left")
+        entry_start_index = ctk.CTkEntry(index_row, width=80)
+        entry_start_index.insert(0, "1")
         entry_start_index.pack(side="left", padx=5)
 
         # End index
-        ttk.Label(index_row, text="Đến video thứ:", width=15).pack(side="left", padx=(20, 0))
-        entry_end_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
-        entry_end_index.set(999)
+        ctk.CTkLabel(index_row, text="Đến video thứ:", width=110, anchor="w").pack(side="left", padx=(20, 0))
+        entry_end_index = ctk.CTkEntry(index_row, width=80)
+        entry_end_index.insert(0, "999")
         entry_end_index.pack(side="left", padx=5)
 
         # Info label
-        info_label = ttk.Label(
+        info_label = ctk.CTkLabel(
             range_frame,
             text=f"💡 Tổng số video hiện tại: {len(self.posts)}",
-            font=("Segoe UI", 9),
-            foreground="#0066cc"
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["accent"]
         )
-        info_label.pack(anchor="w", pady=(5, 0))
+        info_label.pack(anchor="w", padx=10, pady=(5, 10))
 
         # ========== THỜI GIAN ==========
-        time_frame = ttk.Labelframe(dialog, text="⏰ Cài đặt thời gian", padding=10)
+        time_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
         time_frame.pack(fill="x", padx=20, pady=5)
 
+        # Title
+        ctk.CTkLabel(
+            time_frame,
+            text="⏰ Cài đặt thời gian",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
         # Start date picker
-        ttk.Label(time_frame, text="Ngày bắt đầu (dd/mm/yyyy):").pack(anchor="w", pady=(5, 0))
-        entry_start_date = ttk.Entry(time_frame, width=50)
+        ctk.CTkLabel(
+            time_frame,
+            text="Ngày bắt đầu (dd/mm/yyyy):",
+            font=(FONTS["family"], FONTS["size_normal"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(5, 0))
+
+        entry_start_date = ctk.CTkEntry(time_frame, width=400)
         default_date = datetime.now(VN_TZ).strftime("%d/%m/%Y")
         entry_start_date.insert(0, default_date)
-        entry_start_date.pack(pady=5)
+        entry_start_date.pack(padx=10, pady=5)
 
         # Time slots
-        ttk.Label(time_frame, text="Khung giờ (cách nhau bởi dấu phẩy):").pack(anchor="w", pady=(5, 0))
-        ttk.Label(
+        ctk.CTkLabel(
+            time_frame,
+            text="Khung giờ (cách nhau bởi dấu phẩy):",
+            font=(FONTS["family"], FONTS["size_normal"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(5, 0))
+
+        ctk.CTkLabel(
             time_frame,
             text="Ví dụ: 06:00, 10:00, 18:00, 22:00",
-            font=("Segoe UI", 8),
-            foreground="gray"
-        ).pack(anchor="w")
-        entry_time_slots = ttk.Entry(time_frame, width=50)
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
+        ).pack(anchor="w", padx=10)
+
+        entry_time_slots = ctk.CTkEntry(time_frame, width=400)
         entry_time_slots.insert(0, "06:00, 10:00, 18:00, 22:00")
-        entry_time_slots.pack(pady=5)
+        entry_time_slots.pack(padx=10, pady=(5, 10))
 
         result = {"ok": False}
 
@@ -1574,10 +1693,24 @@ class PostTab(ttk.Frame):
             dialog.destroy()
 
         # Buttons
-        btn_frame = ttk.Frame(dialog)
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_frame.pack(pady=20)
-        ttk.Button(btn_frame, text="✅ Áp dụng", command=on_apply, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✅ Áp dụng",
+            command=on_apply,
+            **get_button_style("success"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="❌ Hủy",
+            command=dialog.destroy,
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
 
         dialog.wait_window()
 
@@ -1609,96 +1742,111 @@ class PostTab(ttk.Frame):
             messagebox.showwarning("Cảnh báo", "Không tìm thấy máy ảo nào!\n\nVui lòng thêm máy ảo trong tab 'Quản lý User'.")
             return
 
-        # Dialog
-        dialog = tk.Toplevel(self)
+        # Dialog - CustomTkinter style
+        dialog = ctk.CTkToplevel(self)
         dialog.title("Đặt máy ảo hàng loạt")
         dialog.geometry("600x550")
         dialog.grab_set()
+        dialog.configure(fg_color=COLORS["bg_primary"])
 
         # Info
-        ttk.Label(
+        ctk.CTkLabel(
             dialog,
             text=f"⚙️ Đặt máy ảo hàng loạt cho video",
-            font=("Segoe UI", 12, "bold")
+            font=(FONTS["family"], FONTS["size_large"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
         ).pack(pady=10)
 
-        ttk.Label(
+        ctk.CTkLabel(
             dialog,
             text="(Thời gian của mỗi video sẽ được giữ nguyên)",
-            font=("Segoe UI", 9),
-            foreground="gray"
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
         ).pack(pady=2)
 
         # ========== PHẠM VI VIDEO ==========
-        range_frame = ttk.Labelframe(dialog, text="📌 Phạm vi video áp dụng", padding=10)
+        range_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
         range_frame.pack(fill="x", padx=20, pady=(10, 5))
 
+        # Title
+        ctk.CTkLabel(
+            range_frame,
+            text="📌 Phạm vi video áp dụng",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
         # Row: Start and End index
-        index_row = ttk.Frame(range_frame)
-        index_row.pack(fill="x", pady=5)
+        index_row = ctk.CTkFrame(range_frame, fg_color="transparent")
+        index_row.pack(fill="x", padx=10, pady=5)
 
         # Start index
-        ttk.Label(index_row, text="Từ video thứ:", width=15).pack(side="left")
-        entry_start_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
-        entry_start_index.set(1)
+        ctk.CTkLabel(index_row, text="Từ video thứ:", width=110, anchor="w").pack(side="left")
+        entry_start_index = ctk.CTkEntry(index_row, width=80)
+        entry_start_index.insert(0, "1")
         entry_start_index.pack(side="left", padx=5)
 
         # End index
-        ttk.Label(index_row, text="Đến video thứ:", width=15).pack(side="left", padx=(20, 0))
-        entry_end_index = ttk.Spinbox(index_row, from_=1, to=999, width=10)
-        entry_end_index.set(999)
+        ctk.CTkLabel(index_row, text="Đến video thứ:", width=110, anchor="w").pack(side="left", padx=(20, 0))
+        entry_end_index = ctk.CTkEntry(index_row, width=80)
+        entry_end_index.insert(0, "999")
         entry_end_index.pack(side="left", padx=5)
 
         # Info label
-        info_label = ttk.Label(
+        info_label = ctk.CTkLabel(
             range_frame,
             text=f"💡 Tổng số video hiện tại: {len(self.posts)}",
-            font=("Segoe UI", 9),
-            foreground="#0066cc"
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["accent"]
         )
-        info_label.pack(anchor="w", pady=(5, 0))
+        info_label.pack(anchor="w", padx=10, pady=(5, 10))
 
         # ========== CHỌN MÁY ẢO ==========
-        vm_frame = ttk.Labelframe(dialog, text="🖥️ Chọn máy ảo", padding=10)
-        vm_frame.pack(fill="both", expand=True, padx=20, pady=5)
+        vm_outer_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        vm_outer_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
-        ttk.Label(
-            vm_frame,
+        # Title
+        ctk.CTkLabel(
+            vm_outer_frame,
+            text="🖥️ Chọn máy ảo",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        ctk.CTkLabel(
+            vm_outer_frame,
             text="Các máy ảo sẽ được áp dụng theo thứ tự (round-robin):",
-            font=("Segoe UI", 9)
-        ).pack(anchor="w", pady=(0, 5))
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
+        ).pack(anchor="w", padx=10, pady=(0, 5))
 
-        # Scrollable frame for VM checkboxes
-        canvas = tk.Canvas(vm_frame, height=200)
-        scrollbar = ttk.Scrollbar(vm_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        # Scrollable frame for VM checkboxes - Using CTkScrollableFrame
+        scrollable_frame = ctk.CTkScrollableFrame(
+            vm_outer_frame,
+            height=180,
+            fg_color=COLORS["bg_tertiary"],
+            corner_radius=DIMENSIONS["corner_radius_small"]
         )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollable_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # Checkboxes for each VM
         vm_vars = []
         for vm_info in vm_list:
             var = tk.BooleanVar(value=True)  # Default: all selected
             vm_vars.append((vm_info, var))
-            ttk.Checkbutton(
+            ctk.CTkCheckBox(
                 scrollable_frame,
                 text=vm_info["display"],
                 variable=var,
-                bootstyle="success-round-toggle"
+                font=(FONTS["family"], FONTS["size_normal"]),
+                text_color=COLORS["text_primary"],
+                fg_color=COLORS["success"],
+                hover_color=COLORS["success_hover"]
             ).pack(anchor="w", padx=5, pady=2)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
         # Select/Deselect all buttons
-        btn_select_frame = ttk.Frame(vm_frame)
-        btn_select_frame.pack(fill="x", pady=(5, 0))
+        btn_select_frame = ctk.CTkFrame(vm_outer_frame, fg_color="transparent")
+        btn_select_frame.pack(fill="x", padx=10, pady=(0, 10))
 
         def select_all():
             for _, var in vm_vars:
@@ -1708,8 +1856,21 @@ class PostTab(ttk.Frame):
             for _, var in vm_vars:
                 var.set(False)
 
-        ttk.Button(btn_select_frame, text="✅ Chọn tất cả", command=select_all, width=15).pack(side="left", padx=5)
-        ttk.Button(btn_select_frame, text="❌ Bỏ chọn tất cả", command=deselect_all, width=15).pack(side="left", padx=5)
+        ctk.CTkButton(
+            btn_select_frame,
+            text="✅ Chọn tất cả",
+            command=select_all,
+            **get_button_style("success"),
+            width=140
+        ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            btn_select_frame,
+            text="❌ Bỏ chọn tất cả",
+            command=deselect_all,
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side="left", padx=5)
 
         result = {"ok": False}
 
@@ -1773,10 +1934,24 @@ class PostTab(ttk.Frame):
             dialog.destroy()
 
         # Buttons
-        btn_frame = ttk.Frame(dialog)
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         btn_frame.pack(pady=20)
-        ttk.Button(btn_frame, text="✅ Áp dụng", command=on_apply, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✅ Áp dụng",
+            command=on_apply,
+            **get_button_style("success"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="❌ Hủy",
+            command=dialog.destroy,
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
 
         dialog.wait_window()
 
@@ -2191,11 +2366,43 @@ class PostTab(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Sort by scheduled time (None values last)
-        sorted_posts = sorted(
-            self.posts,
-            key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ))
-        )
+        # Sắp xếp theo tiêu chí được chọn
+        if self.sort_by == "time":
+            # Sắp xếp theo thời gian (None values last)
+            sorted_posts = sorted(
+                self.posts,
+                key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
+                reverse=(self.sort_order == "desc")
+            )
+        elif self.sort_by == "vm":
+            # Sắp xếp theo máy ảo (None/empty last)
+            sorted_posts = sorted(
+                self.posts,
+                key=lambda p: (p.vm_name is None or p.vm_name == "", p.vm_name or ""),
+                reverse=(self.sort_order == "desc")
+            )
+        elif self.sort_by == "status":
+            # Sắp xếp theo trạng thái (draft, pending, processing, posted, failed)
+            status_order = {"draft": 0, "pending": 1, "processing": 2, "posted": 3, "failed": 4}
+            sorted_posts = sorted(
+                self.posts,
+                key=lambda p: status_order.get(p.status, 99),
+                reverse=(self.sort_order == "desc")
+            )
+        elif self.sort_by == "name":
+            # Sắp xếp theo tên video
+            sorted_posts = sorted(
+                self.posts,
+                key=lambda p: p.title.lower(),
+                reverse=(self.sort_order == "desc")
+            )
+        else:
+            # Mặc định: theo thời gian
+            sorted_posts = sorted(
+                self.posts,
+                key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
+                reverse=(self.sort_order == "desc")
+            )
 
         # Add to table
         for idx, post in enumerate(sorted_posts, start=1):
@@ -2226,6 +2433,9 @@ class PostTab(ttk.Frame):
                 # status = pending hoặc failed
                 control_button = "▶ Chạy" if post.is_paused else "⏸ Dừng"
 
+            # Checkbox status
+            checkbox_icon = "☑" if self.checked_posts.get(post.id, False) else "☐"
+
             # Striped rows
             tag = "evenrow" if idx % 2 == 0 else "oddrow"
             self.tree.insert(
@@ -2233,6 +2443,7 @@ class PostTab(ttk.Frame):
                 tk.END,
                 iid=post.id,
                 values=(
+                    checkbox_icon,
                     idx,
                     post.title,  # Hiển thị title thay vì video_name
                     "⚙️",
@@ -2245,6 +2456,27 @@ class PostTab(ttk.Frame):
                 ),
                 tags=(tag,)
             )
+
+        # Cập nhật icon header checkbox dựa trên trạng thái hiện tại
+        if self.posts:
+            checked_count = sum(1 for post in self.posts if self.checked_posts.get(post.id, False))
+            if checked_count == len(self.posts):
+                self.tree.heading("checkbox", text="☑", command=self.toggle_all_checkboxes)
+            else:
+                self.tree.heading("checkbox", text="☐", command=self.toggle_all_checkboxes)
+
+        # Cập nhật label đếm số lượng video
+        total = len(self.posts)
+        draft = sum(1 for p in self.posts if p.status == "draft")
+        pending = sum(1 for p in self.posts if p.status == "pending")
+        processing = sum(1 for p in self.posts if p.status == "processing")
+        posted = sum(1 for p in self.posts if p.status == "posted")
+        failed = sum(1 for p in self.posts if p.status == "failed")
+
+        self.count_label.configure(
+            text=f"📊 Tổng: {total} | ⚙️ Chưa cấu hình: {draft} | ⏳ Chờ: {pending} | "
+                 f"🔄 Đang đăng: {processing} | ✅ Đã đăng: {posted} | ❌ Thất bại: {failed}"
+        )
 
     def on_tree_click(self, event):
         """Handle tree click"""
@@ -2270,7 +2502,11 @@ class PostTab(ttk.Frame):
         if not post:
             return
 
-        if col == "edit":
+        if col == "checkbox":
+            # Toggle checkbox
+            self.checked_posts[post.id] = not self.checked_posts.get(post.id, False)
+            self.load_posts_to_table()
+        elif col == "edit":
             self.edit_post_config(post)
         elif col == "control":
             self.toggle_post_control(post)
@@ -2413,6 +2649,96 @@ class PostTab(ttk.Frame):
         if stopped_count > 0:
             save_scheduled_posts(self.posts)
             self.load_posts_to_table()
+
+    def delete_selected_videos(self):
+        """Xóa tất cả video đã được chọn checkbox"""
+        # Lấy danh sách post_id đã được chọn
+        selected_ids = [post_id for post_id, checked in self.checked_posts.items() if checked]
+
+        if not selected_ids:
+            messagebox.showinfo("Thông báo", "Vui lòng chọn ít nhất 1 video để xóa")
+            return
+
+        # Kiểm tra xem có video nào đang processing không
+        processing_count = 0
+        for post in self.posts:
+            if post.id in selected_ids and post.status == "processing":
+                processing_count += 1
+
+        if processing_count > 0:
+            messagebox.showwarning(
+                "Cảnh báo",
+                f"Có {processing_count} video đang đăng, không thể xóa!\n\nVui lòng bỏ chọn các video đang đăng."
+            )
+            return
+
+        # Xác nhận xóa
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc muốn xóa {len(selected_ids)} video đã chọn?"
+        )
+
+        if not confirm:
+            return
+
+        # Xóa các video đã chọn
+        self.posts = [post for post in self.posts if post.id not in selected_ids]
+
+        # Xóa khỏi checked_posts
+        for post_id in selected_ids:
+            if post_id in self.checked_posts:
+                del self.checked_posts[post_id]
+
+        # Lưu và refresh
+        save_scheduled_posts(self.posts)
+        self.load_posts_to_table()
+
+        messagebox.showinfo("Thành công", f"Đã xóa {len(selected_ids)} video")
+
+    def toggle_all_checkboxes(self):
+        """Chọn/Bỏ chọn tất cả checkbox khi click vào header"""
+        if not self.posts:
+            return
+
+        # Kiểm tra xem có bao nhiêu video đã được chọn
+        checked_count = sum(1 for post in self.posts if self.checked_posts.get(post.id, False))
+
+        # Nếu tất cả đã chọn → bỏ chọn tất cả
+        # Nếu chưa chọn hết → chọn tất cả
+        should_check = (checked_count < len(self.posts))
+
+        # Cập nhật trạng thái cho tất cả video
+        for post in self.posts:
+            self.checked_posts[post.id] = should_check
+
+        # Refresh bảng (load_posts_to_table sẽ tự động cập nhật icon header)
+        self.load_posts_to_table()
+
+    def on_sort_change(self, event=None):
+        """Xử lý khi thay đổi tiêu chí sắp xếp"""
+        selected = self.sort_combo.get()
+
+        # Map từ text hiển thị sang sort_by value
+        sort_map = {
+            "Thời gian đăng": "time",
+            "Máy ảo": "vm",
+            "Trạng thái": "status",
+            "Tên video": "name"
+        }
+
+        self.sort_by = sort_map.get(selected, "time")
+        self.load_posts_to_table()
+
+    def toggle_sort_order(self):
+        """Đổi chiều sắp xếp (tăng dần <-> giảm dần)"""
+        if self.sort_order == "asc":
+            self.sort_order = "desc"
+            self.sort_order_btn.configure(text="⬇️ Giảm dần")
+        else:
+            self.sort_order = "asc"
+            self.sort_order_btn.configure(text="⬆️ Tăng dần")
+
+        self.load_posts_to_table()
 
     def edit_post_config(self, post: ScheduledPost):
         """Edit post configuration (VM và thời gian)"""

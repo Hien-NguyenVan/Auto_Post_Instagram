@@ -68,8 +68,10 @@ RESOURCE_ID_ALLOW_2 = "com.instagram.android:id/bb_primary_action_above"
 RESOURCE_ID_CANCEL_BUTTON = "com.instagram.android:id/appirater_cancel_button"
 RESOURCE_ID_PENDING_MEDIA = "com.instagram.android:id/row_pending_media_reshare_button"
 RETRY_ID_MEDIA = "com.instagram.android:id/row_pending_media_retry_button"
+RESOURCE_ID_CREATE_POST = "com.instagram.android:id/creation_tab"
 # XPath for resource IDs (formatted)
 XPATH_FEED_TAB = f'//*[@resource-id="{RESOURCE_ID_FEED_TAB}"]'
+XPATH_CREATE_POST = f'//*[@resource-id="{RESOURCE_ID_CREATE_POST}"]'
 XPATH_PROFILE_TAB = f'//*[@resource-id="{RESOURCE_ID_PROFILE_TAB}"]'
 XPATH_PROFILE_NAME = f'//*[@resource-id="{RESOURCE_ID_PROFILE_NAME}"]'
 XPATH_PROMO_BUTTON = f'//*[@resource-id="{RESOURCE_ID_PROMO_BUTTON}"]'
@@ -114,3 +116,5 @@ DEFAULT_VM_RESOLUTION = "720,1280,320"
 DEFAULT_VM_CPU = "2"
 DEFAULT_VM_MEMORY = "2048"
 ADB_DEBUG_SETTING = '"basicSettings.adbDebug": 1,'
+DEFAULT_VM_DEVICES_NAME = "samsung"
+DEFAULT_VM_DEVICES_MODEL = "SM-S9210"

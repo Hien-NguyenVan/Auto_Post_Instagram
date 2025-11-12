@@ -11,7 +11,7 @@ from constants import (
     WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG,
     TIMEOUT_DEFAULT, TIMEOUT_APP_OPEN, TIMEOUT_SHORT,
     MAX_RETRY_OPEN_APP, MAX_RETRY_POST_NOTIFICATION, MAX_RETRY_FIND_TAB,
-    XPATH_INSTAGRAM_APP, XPATH_FEED_TAB, XPATH_PROMO_BUTTON,
+    XPATH_INSTAGRAM_APP, XPATH_FEED_TAB, XPATH_PROMO_BUTTON, XPATH_CREATE_POST,
     XPATH_PROFILE_TAB, XPATH_NEXT_BUTTON, XPATH_RETRY_MEDIA, XPATH_RIGHT_ACTION,
     XPATH_DOWNLOAD_NUX, XPATH_PRIMARY_ACTION, XPATH_CAPTION_INPUT,
     XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,
@@ -37,7 +37,8 @@ class InstagramPost(BaseInstagramAutomation):
         """
         super().__init__(log_callback)
 
-    def auto_post(self, vm_name: str, adb_address: str, title: str) -> bool:
+    def auto_post(self, vm_name: str, adb_address: str, title: str, use_launchex: bool = False,
+                  ldconsole_exe: str = None) -> bool:
         """
         Automatically post a video to Instagram.
 
@@ -45,6 +46,8 @@ class InstagramPost(BaseInstagramAutomation):
             vm_name: Virtual machine name
             adb_address: ADB address (e.g., emulator-5555)
             title: Post title/caption
+            use_launchex: If True, use ldconsole launchex instead of clicking Instagram app
+            ldconsole_exe: Path to ldconsole.exe (required if use_launchex=True)
 
         Returns:
             bool: True if post successful
@@ -56,21 +59,39 @@ class InstagramPost(BaseInstagramAutomation):
 
             self.log(vm_name, "🔄 Bắt đầu đăng bài...")
 
-            # Open Instagram app with retries
-            self.log(vm_name, "📱 Mở ứng dụng Instagram...")
-            for i in range(MAX_RETRY_OPEN_APP):
-                if d.xpath(XPATH_INSTAGRAM_APP).exists:
-                    if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=WAIT_EXTRA_LONG, vm_name=vm_name):
-                        self.log(vm_name, "❌ Tìm thấy nhưng không click được app Instagram", "ERROR")
-                        return False
-                    break
-                else:
-                    d.app_stop(CHROME_PACKAGE)
-                    self.log(vm_name, f"Thử lại lần {i+1}/{MAX_RETRY_OPEN_APP}...")
-                    time.sleep(WAIT_SHORT)
+            # Open Instagram app
+            if use_launchex and ldconsole_exe:
+                # Use ldconsole launchex to open Instagram directly
+                self.log(vm_name, "📱 Mở ứng dụng Instagram bằng launchex...")
+                import subprocess
+                try:
+                    subprocess.run(
+                        [ldconsole_exe, "launchex", "--name", vm_name,
+                         "--packagename", "com.instagram.android"],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=10
+                    )
+                    time.sleep(WAIT_EXTRA_LONG)
+                    self.log(vm_name, "✅ Đã mở Instagram app")
+                except Exception as e:
+                    self.log(vm_name, f"❌ Lỗi mở Instagram bằng launchex: {e}", "ERROR")
+                    return False
             else:
-                self.log(vm_name, f"❌ Không tìm thấy app Instagram sau {MAX_RETRY_OPEN_APP} lần thử", "ERROR")
-                return False
+                # Original method: click on Instagram app icon
+                self.log(vm_name, "📱 Mở ứng dụng Instagram...")
+                for i in range(MAX_RETRY_OPEN_APP):
+                    if d.xpath(XPATH_INSTAGRAM_APP).exists:
+                        if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=WAIT_EXTRA_LONG, vm_name=vm_name):
+                            self.log(vm_name, "❌ Tìm thấy nhưng không click được app Instagram", "ERROR")
+                            return False
+                        break
+                    else:
+                        d.app_stop(CHROME_PACKAGE)
+                        self.log(vm_name, f"Thử lại lần {i+1}/{MAX_RETRY_OPEN_APP}...")
+                        time.sleep(WAIT_SHORT)
+                else:
+                    self.log(vm_name, f"❌ Không tìm thấy app Instagram sau {MAX_RETRY_OPEN_APP} lần thử", "ERROR")
+                    return False
 
             # Wait for feed tab to appear
             if not self.wait_for_element(d, XPATH_FEED_TAB, timeout=TIMEOUT_APP_OPEN,
@@ -83,42 +104,57 @@ class InstagramPost(BaseInstagramAutomation):
             self.safe_click(d, XPATH_PROMO_BUTTON, sleep_after=WAIT_LONG,
                           vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
 
-            # Go to profile tab
-            self.log(vm_name, "Chuyển sang tab Profile")
-            if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG, vm_name=vm_name):
-                self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
-                return False
-
-            # Find and click create tab or left button
-            self.log(vm_name, "Tìm Create tab hoặc nút trái")
-            for i in range(MAX_RETRY_FIND_TAB):
-                creation_tab = d.xpath(CONTENT_DESC_CREATE_NEW).exists
-                action_left = d(resourceId=RESOURCE_ID_LEFT_ACTION).exists
-
-                if creation_tab:
-                    self.log(vm_name, "Nhấn Create tab")
-                    if not self.safe_click(d, CONTENT_DESC_CREATE_NEW, sleep_after=WAIT_LONG, vm_name=vm_name):
-                        self.log(vm_name, "❌ Không click được Create tab", "ERROR")
-                        return False
-                    break
-
-                elif action_left:
-                    self.log(vm_name, "Nhấn nút trái")
-                    if not self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG, vm_name=vm_name):
-                        self.log(vm_name, "❌ Không click được nút trái", "ERROR")
-                        return False
-                    break
-
-                time.sleep(WAIT_SHORT)
+            # kiểm tra có create tab hay khong
+            if self.wait_for_element(d, XPATH_CREATE_POST,vm_name=vm_name,description="create post", timeout=WAIT_LONG ):
+                self.safe_click(d, XPATH_CREATE_POST, sleep_after=WAIT_LONG,
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
             else:
-                self.log(vm_name, f"❌ Không tìm thấy Create tab hoặc nút trái sau {MAX_RETRY_FIND_TAB} lần", "ERROR")
-                return False
+                # Go to profile tab
+                self.log(vm_name, "Chuyển sang tab Profile")
+                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG, vm_name=vm_name):
+                    self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
+                    return False
 
-            # Click "Create new post"
-            self.log(vm_name, "Nhấn Create new post")
-            if not self.safe_click(d, CONTENT_DESC_CREATE_POST, sleep_after=WAIT_LONG, vm_name=vm_name):
-                self.log(vm_name, "⚠️ Không tìm thấy nút Post", "WARNING")
-                return False
+                self.log(vm_name, "Chuyển sang tab feed tab")
+                if not self.safe_click(d, XPATH_FEED_TAB, sleep_after=WAIT_SHORT, vm_name=vm_name):
+                    self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
+                    return False
+
+                self.log(vm_name, "Chuyển sang tab Profile")
+                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_MEDIUM, vm_name=vm_name):
+                    self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
+                    return False
+
+                # Find and click create tab or left button
+                self.log(vm_name, "Tìm Create tab hoặc nút trái")
+                for i in range(MAX_RETRY_FIND_TAB):
+                    creation_tab = d.xpath(CONTENT_DESC_CREATE_NEW).exists
+                    action_left = d(resourceId=RESOURCE_ID_LEFT_ACTION).exists
+
+                    if creation_tab:
+                        self.log(vm_name, "Nhấn Create tab")
+                        if not self.safe_click(d, CONTENT_DESC_CREATE_NEW, sleep_after=WAIT_LONG, vm_name=vm_name):
+                            self.log(vm_name, "❌ Không click được Create tab", "ERROR")
+                            return False
+                        break
+
+                    elif action_left:
+                        self.log(vm_name, "Nhấn nút trái")
+                        if not self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG, vm_name=vm_name):
+                            self.log(vm_name, "❌ Không click được nút trái", "ERROR")
+                            return False
+                        break
+
+                    time.sleep(WAIT_SHORT)
+                else:
+                    self.log(vm_name, f"❌ Không tìm thấy Create tab hoặc nút trái sau {MAX_RETRY_FIND_TAB} lần", "ERROR")
+                    return False
+
+                # Click "Create new post"
+                self.log(vm_name, "Nhấn Create new post")
+                if not self.safe_click(d, CONTENT_DESC_CREATE_POST, sleep_after=WAIT_LONG, vm_name=vm_name):
+                    self.log(vm_name, "⚠️ Không tìm thấy nút Post", "WARNING")
+                    return False
 
             # Click Next (top)
             self.log(vm_name, "Nhấn Next (trên)")

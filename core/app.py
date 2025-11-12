@@ -1,75 +1,87 @@
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+import customtkinter as ctk
+from tkinter import ttk  # For Treeview styling
+from ui_theme import *
 
 from tabs.tab_users import UsersTab
 from tabs.tab_post import PostTab
 from tabs.tab_follow import FollowTab
 
 
-class App(ttk.Window):
-    def __init__(self):
-        # Initialize with a modern theme
-        # Available themes: cosmo, flatly, litera, minty, lumen, sandstone, yeti, pulse, united, morph, journal, darkly, superhero, solar, cyborg, vapor, simplex, cerculean
-        super().__init__(themename="cosmo")
+class App(ctk.CTk):
+    """Main Application Window - Modern Windows 11 Style"""
 
-        self.title("Instagram Automation Tool")
-        self.geometry("1500x700")
+    def __init__(self):
+        super().__init__()
+
+        # Apply Windows 11 theme
+        apply_ctk_theme()
+        self.configure(fg_color=COLORS["bg_primary"])
+
+        self.title("Instagram Automation Tool - Windows 11 Style")
+        self.geometry("1600x900")
+
+        # Set minimum window size
+        self.minsize(1200, 700)
 
         # Set window icon if available
         # self.iconbitmap("assets/logo.ico")
 
-        # ===================== CUSTOM TREEVIEW STYLE =====================
-        style = self.style
+        # ===================== TREEVIEW STYLE (for tables in tabs) =====================
+        style = ttk.Style()
+        style.theme_use("clam")
 
-        # Tăng độ cao hàng và cỡ chữ
+        # Global Treeview style
         style.configure(
             "Treeview",
-            rowheight=40,  # Tăng chiều cao hàng lên 40px
-            font=("Segoe UI", 11),  # Tăng font lên 11
-            borderwidth=1,
-            relief="solid"
+            rowheight=40,
+            font=(FONTS["family"], FONTS["size_normal"]),
+            background=COLORS["bg_secondary"],
+            foreground=COLORS["text_primary"],
+            fieldbackground=COLORS["bg_secondary"],
+            borderwidth=0
         )
 
-        # Style cho header
+        # Treeview heading style
         style.configure(
             "Treeview.Heading",
-            font=("Segoe UI", 11, "bold"),  # Font đậm cho header
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            background=COLORS["surface_3"],
+            foreground=COLORS["text_primary"],
             borderwidth=1,
-            relief="raised"
+            relief="flat"
         )
 
-        # Màu nền xen kẽ và selected
+        # Treeview selection color
         style.map(
             "Treeview",
-            background=[("selected", "#2196F3")],  # Màu xanh khi select
-            foreground=[("selected", "white")]
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["text_on_accent"])]
         )
 
-        # Tag cho hàng xen kẽ màu
-        # Sẽ được áp dụng trong các tab khi insert rows
-
-        # ===================== CUSTOM BUTTON STYLE =====================
-        # Tăng padding và font-weight cho buttons
-        style.configure(
-            "TButton",
-            padding=(12, 8),  # (horizontal, vertical) padding
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=2,
-            relief="raised"
+        # ===================== CREATE TABVIEW =====================
+        self.tabview = ctk.CTkTabview(
+            self,
+            corner_radius=DIMENSIONS["corner_radius_large"],
+            fg_color=COLORS["bg_secondary"],
+            segmented_button_fg_color=COLORS["surface_1"],
+            segmented_button_selected_color=COLORS["accent"],
+            segmented_button_selected_hover_color=COLORS["accent_hover"],
+            segmented_button_unselected_color=COLORS["surface_2"],
+            segmented_button_unselected_hover_color=COLORS["surface_3"],
+            text_color=COLORS["text_primary"],
+            text_color_disabled=COLORS["disabled"]
         )
-
-        # Hover effect cho buttons
-        style.map(
-            "TButton",
-            relief=[("pressed", "sunken"), ("active", "raised")],
-            borderwidth=[("pressed", 3), ("active", 2)]
-        )
-
-        # ===================== CREATE NOTEBOOK =====================
-        notebook = ttk.Notebook(self, bootstyle="primary")
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tabview.pack(fill="both", expand=True, padx=DIMENSIONS["spacing_lg"], pady=DIMENSIONS["spacing_lg"])
 
         # Add 3 tabs with icons
-        notebook.add(UsersTab(notebook), text="  👤 Quản lý máy ảo & Tài khoản  ")
-        notebook.add(PostTab(notebook), text="  📅 Đặt lịch đăng bài  ")
-        notebook.add(FollowTab(notebook), text="  ▶️ Theo dõi & Tự động hóa  ")
+        tab1 = self.tabview.add("👤 Quản lý VM & Tài khoản")
+        tab2 = self.tabview.add("📅 Đặt lịch đăng bài")
+        tab3 = self.tabview.add("▶️ Theo dõi & Tự động")
+
+        # Create tab contents
+        UsersTab(tab1).pack(fill="both", expand=True)
+        PostTab(tab2).pack(fill="both", expand=True)
+        FollowTab(tab3).pack(fill="both", expand=True)
+
+        # Set default tab
+        self.tabview.set("👤 Quản lý VM & Tài khoản")

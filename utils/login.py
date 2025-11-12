@@ -190,7 +190,7 @@ class InstagramLogin(BaseInstagramAutomation):
 
             # Get Instagram account name
             self.log(vm_name, "📝 Lấy tên tài khoản Instagram")
-            if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_SHORT,
+            if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG,
                                   vm_name=vm_name, timeout=TIMEOUT_SHORT):
                 self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
             else:
