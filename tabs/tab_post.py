@@ -26,7 +26,7 @@ from config import LDCONSOLE_EXE, DATA_DIR, ADB_EXE
 from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG, TIMEOUT_MINUTE
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
-from utils.delete_file import clear_dcim
+from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
 from utils.api_manager_multi import multi_api_manager
 from utils.yt_api import (
@@ -593,6 +593,15 @@ class PostScheduler(threading.Thread):
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
+
+            # Clear DCIM and Pictures folders before sending file
+            post.log(f"🗑️ Xóa DCIM và Pictures...")
+            try:
+                clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
+                clear_pictures(adb_address, log_callback=lambda msg: post.log(msg))
+                post.log(f"✅ Đã xóa DCIM và Pictures")
+            except Exception as e:
+                post.log(f"⚠️ Lỗi khi xóa DCIM/Pictures: {e}")
 
             # Send file to VM
             post.log(f"📤 Gửi file vào máy ảo...")

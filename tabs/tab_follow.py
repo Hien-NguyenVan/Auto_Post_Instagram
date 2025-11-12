@@ -29,7 +29,7 @@ import sys
 from utils.download_dlp import download_video_api, download_tiktok_direct_url
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
-from utils.delete_file import clear_dcim
+from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from config import LDCONSOLE_EXE, ADB_EXE
@@ -645,6 +645,23 @@ class Stream:
                                 vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
                                 time.sleep(WAIT_EXTRA_LONG)
                                 break
+
+                            # Clear DCIM and Pictures folders before sending file
+                            try:
+                                # Read port from JSON to create adb_address
+                                from config import DATA_DIR
+                                json_path = os.path.join(DATA_DIR, f"{vm_name}.json")
+                                with open(json_path, "r", encoding="utf-8") as f:
+                                    vm_info = json.load(f)
+                                port = vm_info.get("port")
+                                adb_address = f"emulator-{port}"
+
+                                self.log(f"🗑️ Xóa DCIM và Pictures...")
+                                clear_dcim(adb_address, log_callback=lambda msg: self.log(msg))
+                                clear_pictures(adb_address, log_callback=lambda msg: self.log(msg))
+                                self.log(f"✅ Đã xóa DCIM và Pictures")
+                            except Exception as e:
+                                self.log(f"⚠️ Lỗi khi xóa DCIM/Pictures: {e}")
 
                             self.log(f"📤 Gửi file sang máy ảo")
                             success, success_push, reason = self.worker_helper.run_blocking_func(
