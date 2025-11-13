@@ -17,7 +17,7 @@ class App(ctk.CTk):
         apply_ctk_theme()
         self.configure(fg_color=COLORS["bg_primary"])
 
-        self.title("Instagram Automation Tool - Windows 11 Style")
+        self.title("Instagram Automation Tool")
         self.geometry("1600x900")
 
         # Set minimum window size

@@ -215,7 +215,7 @@ class VMManager:
     def wait_adb_ready(device: str, adb_path: str, timeout: int = 30,
                        check_interval: int = 2, log_callback=None) -> bool:
         """
-        Chờ ADB kết nối đến device.
+        Chờ ADB kết nối đến device và device ở trạng thái "device" (không phải offline).
 
         Args:
             device: Device name (vd: "emulator-5556")
@@ -225,11 +225,12 @@ class VMManager:
             log_callback: Optional callback function(msg) để log ra UI
 
         Returns:
-            bool: True nếu ADB đã connect, False nếu timeout
+            bool: True nếu ADB đã connect và state = "device", False nếu timeout
         """
         logger = logging.getLogger(__name__)
         elapsed = 0
         last_progress_log = 0
+        last_state = None
 
         logger.info(f"⏳ Chờ ADB kết nối đến '{device}' (timeout={timeout}s)...")
 
@@ -245,13 +246,35 @@ class VMManager:
                     timeout=10
                 )
 
-                # Check if device is in the output
-                if device in result.stdout:
-                    if log_callback:
-                        log_callback(f"✅ ADB đã kết nối (sau {elapsed}s)")
-                    logger.info(f"✅ ADB đã kết nối đến '{device}' sau {elapsed}s")
-                    return True
-                else:
+                # Parse output để check device state
+                # Format: "emulator-5554    device" hoặc "emulator-5554    offline"
+                device_found = False
+                for line in result.stdout.splitlines():
+                    parts = line.split()
+                    # Cần ít nhất 2 phần: device_name và state
+                    if len(parts) >= 2 and parts[0] == device:
+                        device_found = True
+                        state = parts[1]  # device, offline, unauthorized, etc.
+
+                        # Log khi state thay đổi
+                        if state != last_state:
+                            if log_callback:
+                                log_callback(f"   📱 Device state: {state} (sau {elapsed}s)")
+                            logger.info(f"Device '{device}' state: {state}")
+                            last_state = state
+
+                        # Chỉ return True khi state = "device" (không phải offline/unauthorized)
+                        if state == "device":
+                            if log_callback:
+                                log_callback(f"✅ ADB đã kết nối (sau {elapsed}s)")
+                            logger.info(f"✅ ADB đã kết nối đến '{device}' sau {elapsed}s (state: device)")
+                            return True
+                        else:
+                            # Device có trong list nhưng chưa sẵn sàng
+                            logger.debug(f"Device '{device}' chưa sẵn sàng (state: {state})")
+                        break
+
+                if not device_found:
                     logger.debug(f"Device '{device}' chưa xuất hiện trong 'adb devices'")
 
             except subprocess.TimeoutExpired:
@@ -268,16 +291,17 @@ class VMManager:
             # Log progress mỗi 10s
             if elapsed > 0 and elapsed - last_progress_log >= 10:
                 if log_callback:
-                    log_callback(f"   ⏳ Vẫn đang chờ ADB... ({elapsed}s/{timeout}s)")
+                    state_str = f", state={last_state}" if last_state else ""
+                    log_callback(f"   ⏳ Vẫn đang chờ ADB... ({elapsed}s/{timeout}s{state_str})")
                 last_progress_log = elapsed
 
             time.sleep(check_interval)
             elapsed += check_interval
 
-        msg = f"❌ Timeout {timeout}s - ADB không kết nối được"
+        msg = f"❌ Timeout {timeout}s - ADB không kết nối được (state cuối: {last_state})"
         if log_callback:
             log_callback(msg)
-        logger.error(f"⏱️ Timeout {timeout}s - ADB chưa kết nối đến '{device}'")
+        logger.error(f"⏱️ Timeout {timeout}s - ADB chưa kết nối đến '{device}' (state cuối: {last_state})")
         return False
 
     @staticmethod
