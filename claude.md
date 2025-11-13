@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.2
+> **Phiên bản hiện tại:** v1.5.3
 
 ---
 
@@ -433,6 +433,69 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.3 - Improve send_file error logging and debugging
+**File thay đổi:**
+- `utils/send_file.py`
+
+**Nội dung:**
+- **🐛 Bug Fix:** "Gửi file thất bại" nhưng không biết nguyên nhân cụ thể
+- **User experience trước:**
+  ```
+  [14:44:08] 📤 Gửi file vào máy ảo...
+  [14:44:08] 🔹 Device: emulator-5556
+  [14:44:08] ❌ Gửi file thất bại
+  ```
+  → Không biết lỗi gì!
+
+- **Vấn đề:**
+  - Exception handler đã comment log: `# log(f"❌ Lỗi: {e}")` (line 87)
+  - Không log ADB connection check details
+  - Không log adb push stderr/stdout khi fail
+  - Không biết lỗi xảy ra ở bước nào
+
+- **Fix:**
+  1. **Uncomment exception log** để catch tất cả errors
+  2. **Thêm log ADB check:**
+     - "🔍 Kiểm tra ADB connection..."
+     - Nếu fail: Log adb devices output
+     - Nếu OK: "✅ Device đã kết nối ADB"
+  3. **Thêm adb push error details:**
+     - Log returncode
+     - Log stderr nếu có
+     - Log stdout nếu có
+
+- **User experience sau:**
+  ```
+  [14:44:08] 📤 Gửi file vào máy ảo...
+  [14:44:08] 🔹 Device: emulator-5556
+  [14:44:08]    🔍 Kiểm tra ADB connection...
+  [14:44:08] ❌ Device 'emulator-5556' không có trong 'adb devices'
+  [14:44:08]    📋 Output: List of devices attached
+                           emulator-5554    device
+  ```
+  → Biết rõ: Port 5556 không connect, chỉ có 5554!
+
+**Lý do:**
+- Debug nhanh hơn: Biết ngay lỗi ở đâu (file, port, ADB, push)
+- Không phải đoán: Log chi tiết stderr/stdout
+- Fix được ngay: Thấy rõ ADB devices output
+
+**Impact:**
+- ✅ Exception không còn bị nuốt
+- ✅ Biết device có connect ADB không
+- ✅ Thấy được adb devices output
+- ✅ Debug adb push errors dễ hơn
+- ✅ Tiết kiệm thời gian troubleshoot
+
+**Code changes:**
+- Line 42: Add "Kiểm tra ADB connection" log
+- Line 49-52: Add detailed ADB check failure log with output
+- Line 61: Add capture_output=True to adb push
+- Line 86-90: Add stderr/stdout logging on push failure
+- Line 87: Uncomment exception log
 
 ---
 

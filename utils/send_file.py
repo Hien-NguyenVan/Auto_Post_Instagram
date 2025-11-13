@@ -39,14 +39,17 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
         log(f"🔹 Device: {device}")
 
         # 🔹 3️⃣ Kiểm tra kết nối ADB
+        log(f"   🔍 Kiểm tra ADB connection...")
         result = subprocess.run(
             [adb_path, "devices"],
             capture_output=True, text=True, encoding="utf-8", errors="ignore",
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         if device not in result.stdout:
-            log(f"⚠️ Máy ảo {vm_name} (port {port}) chưa bật hoặc chưa kết nối ADB.")
+            log(f"❌ Device '{device}' không có trong 'adb devices'")
+            log(f"   📋 Output: {result.stdout.strip()}")
             return False
+        log(f"   ✅ Device '{device}' đã kết nối ADB")
 
         # 🔹 4️⃣ Thực hiện adb push
         filename = os.path.basename(local_path)
@@ -55,7 +58,7 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
 
         push = subprocess.run(
             [adb_path, "-s", device, "push", local_path, remote_path],
-            text=True, encoding="utf-8", errors="ignore",
+            capture_output=True, text=True, encoding="utf-8", errors="ignore",
             creationflags=subprocess.CREATE_NO_WINDOW
         )
 
@@ -80,9 +83,13 @@ def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe"
 
             return True
         else:
-            log(f"❌ Gửi file thất bại (mã lỗi {push.returncode})")
+            log(f"❌ Gửi file thất bại (returncode: {push.returncode})")
+            if push.stderr:
+                log(f"   📋 Error: {push.stderr.strip()}")
+            if push.stdout:
+                log(f"   📋 Output: {push.stdout.strip()}")
             return False
 
     except Exception as e:
-        # log(f"❌ Lỗi khi gửi file sang máy ảo: {e}")
+        log(f"❌ Lỗi khi gửi file sang máy ảo: {e}")
         return False
