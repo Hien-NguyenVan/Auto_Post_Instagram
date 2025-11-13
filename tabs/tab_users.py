@@ -686,6 +686,7 @@ class UsersTab(ctk.CTkFrame):
             return
 
         # === Lưu dữ liệu vào data/ ===
+        path = os.path.join(DATA_DIR, f"{vm_name}.json")
         data = {
             "id":vm_id,
             "vm_name": vm_name,

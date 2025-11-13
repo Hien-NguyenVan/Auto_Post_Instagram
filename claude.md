@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.5
+> **Phiên bản hiện tại:** v1.4.6
 
 ---
 
@@ -404,6 +404,29 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.4.6 - Fix undefined variable 'path' trong tab_users.py
+**File thay đổi:**
+- `tabs/tab_users.py`
+
+**Nội dung:**
+- **🐛 Bug Fix:** Dòng 698 (nay là 699) bị lỗi `"path" is not defined`
+- **Fix:** Thêm dòng 689 để định nghĩa biến `path` trước khi dùng:
+  ```python
+  path = os.path.join(DATA_DIR, f"{vm_name}.json")
+  ```
+- Biến `path` được dùng để lưu file JSON config cho VM mới tạo
+- Lỗi xảy ra trong hàm tạo VM mới (`create_vm`)
+
+**Lý do:**
+- Khi tạo VM mới, code cần lưu config vào file JSON nhưng thiếu định nghĩa path
+- Lỗi này khiến không thể tạo VM mới được
+
+**Impact:**
+- ✅ Fix lỗi không tạo được VM mới
+- ✅ JSON config được lưu đúng vị trí: `data/{vm_name}.json`
 
 ---
 
