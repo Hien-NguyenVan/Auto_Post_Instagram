@@ -2504,8 +2504,9 @@ class PostTab(ctk.CTkFrame):
                     reverse=(self.sort_order == "desc")
                 )
         else:
-            # ✅ KHÔNG SORT: Giữ nguyên thứ tự hiện tại
-            sorted_posts = self.posts
+            # ✅ KHÔNG SORT: Giữ nguyên thứ tự đã sort trước đó
+            # Dùng displayed_posts nếu có (đã sort), fallback về self.posts nếu chưa init
+            sorted_posts = self.displayed_posts if hasattr(self, 'displayed_posts') and self.displayed_posts else self.posts
 
         # ✅ Lưu thứ tự hiển thị để bulk operations sử dụng
         self.displayed_posts = sorted_posts

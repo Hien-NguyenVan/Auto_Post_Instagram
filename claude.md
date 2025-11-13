@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.10
+> **Phiên bản hiện tại:** v1.5.11
 
 ---
 
@@ -329,7 +329,14 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.10 (2025-11-13) - Current Version
+### v1.5.11 (2025-11-13) - Current Version
+**🐛 CRITICAL FIX: Fix table jumping issue when toggle checkbox after sorting**
+- Fix table nhảy vị trí khi toggle checkbox sau khi sort
+- load_posts_to_table() giờ dùng displayed_posts thay vì posts khi auto_sort=False
+- Giữ nguyên thứ tự đã sort khi thao tác (check/uncheck, edit)
+- Fix user confusion: "Vừa check video ở hàng 2, nó nhảy sang hàng 5!"
+
+### v1.5.10
 **✨ UX IMPROVEMENT: Add description parameter to safe_click and safe_send_text**
 - Thêm parameter `description` cho `safe_click()` và `safe_send_text()`
 - Log rõ ràng hơn: "🖱️ Đang click Next button (top)..." thay vì "🖱️ Đang click element //xpath..."
