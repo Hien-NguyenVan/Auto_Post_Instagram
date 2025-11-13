@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.11
+> **Phiên bản hiện tại:** v1.5.12
 
 ---
 
@@ -329,7 +329,15 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.11 (2025-11-13) - Current Version
+### v1.5.12 (2025-11-13) - Current Version
+**✨ FEATURE: Add "Huỷ tất cả" button to bulk schedule and bulk assign VM**
+- Thêm nút "🗑️ Huỷ tất cả" trong dialog Lên lịch hàng loạt
+- Thêm nút "🗑️ Huỷ tất cả" trong dialog Đặt máy ảo hàng loạt
+- Gỡ bỏ thời gian/máy ảo đã set trong phạm vi videos
+- Videos trở về trạng thái "Chưa cấu hình" sau khi huỷ
+- Có confirmation dialog trước khi gỡ bỏ
+
+### v1.5.11
 **🐛 CRITICAL FIX: Fix table jumping issue when toggle checkbox after sorting**
 - Fix table nhảy vị trí khi toggle checkbox sau khi sort
 - load_posts_to_table() giờ dùng displayed_posts thay vì posts khi auto_sort=False

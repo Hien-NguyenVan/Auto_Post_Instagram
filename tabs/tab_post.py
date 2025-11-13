@@ -1670,6 +1670,68 @@ class PostTab(ctk.CTkFrame):
 
         result = {"ok": False}
 
+        def on_clear_all():
+            """Huỷ tất cả thời gian đã đặt trong phạm vi"""
+            # Parse start and end index
+            try:
+                start_idx = int(entry_start_index.get())
+                end_idx = int(entry_end_index.get())
+
+                if start_idx < 1:
+                    messagebox.showerror("Lỗi", "Chỉ số bắt đầu phải >= 1", parent=dialog)
+                    return
+
+                if end_idx < start_idx:
+                    messagebox.showerror("Lỗi", "Chỉ số kết thúc phải >= chỉ số bắt đầu", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("Lỗi", "Chỉ số không hợp lệ", parent=dialog)
+                return
+
+            # Confirm
+            if not messagebox.askyesno(
+                "Xác nhận",
+                f"⚠️ Bạn có chắc muốn GỠ BỎ thời gian của các video từ {start_idx} đến {end_idx}?\n\n"
+                f"Các video này sẽ trở về trạng thái 'Chưa cấu hình' nếu không có máy ảo.",
+                parent=dialog
+            ):
+                return
+
+            # Clear scheduled time
+            cleared_count = 0
+            for idx, post in enumerate(self.displayed_posts, start=1):
+                if idx < start_idx or idx > end_idx:
+                    continue
+
+                # Gỡ thời gian
+                post.scheduled_time_vn = None
+                post.post_now = False
+
+                # Set status về draft nếu không có VM
+                if not post.vm_name:
+                    post.status = "draft"
+                else:
+                    # Có VM nhưng không có time → vẫn là draft
+                    post.status = "draft"
+
+                # Pause lại
+                post.is_paused = True
+                cleared_count += 1
+
+            # Save và reload
+            self.posts[:] = self.displayed_posts
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table(auto_sort=False)
+
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã gỡ bỏ thời gian thành công!\n\n"
+                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                f"🗑️ Đã gỡ: {cleared_count} video",
+                parent=dialog
+            )
+            dialog.destroy()
+
         def on_apply():
             # Parse start and end index
             try:
@@ -1773,7 +1835,15 @@ class PostTab(ctk.CTkFrame):
             text="✅ Áp dụng",
             command=on_apply,
             **get_button_style("success"),
-            width=140
+            width=120
+        ).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="🗑️ Huỷ tất cả",
+            command=on_clear_all,
+            **get_button_style("danger"),
+            width=120
         ).pack(side=tk.LEFT, padx=5)
 
         ctk.CTkButton(
@@ -1781,7 +1851,7 @@ class PostTab(ctk.CTkFrame):
             text="❌ Hủy",
             command=dialog.destroy,
             **get_button_style("secondary"),
-            width=140
+            width=120
         ).pack(side=tk.LEFT, padx=5)
 
         dialog.wait_window()
@@ -1959,6 +2029,68 @@ class PostTab(ctk.CTkFrame):
 
         result = {"ok": False}
 
+        def on_clear_all_vm():
+            """Huỷ tất cả máy ảo đã đặt trong phạm vi"""
+            # Parse start and end index
+            try:
+                start_idx = int(entry_start_index.get())
+                end_idx = int(entry_end_index.get())
+
+                if start_idx < 1:
+                    messagebox.showerror("Lỗi", "Chỉ số bắt đầu phải >= 1", parent=dialog)
+                    return
+
+                if end_idx < start_idx:
+                    messagebox.showerror("Lỗi", "Chỉ số kết thúc phải >= chỉ số bắt đầu", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("Lỗi", "Chỉ số không hợp lệ", parent=dialog)
+                return
+
+            # Confirm
+            if not messagebox.askyesno(
+                "Xác nhận",
+                f"⚠️ Bạn có chắc muốn GỠ BỎ máy ảo của các video từ {start_idx} đến {end_idx}?\n\n"
+                f"Các video này sẽ trở về trạng thái 'Chưa cấu hình' nếu không có thời gian.",
+                parent=dialog
+            ):
+                return
+
+            # Clear VM
+            cleared_count = 0
+            for idx, post in enumerate(self.displayed_posts, start=1):
+                if idx < start_idx or idx > end_idx:
+                    continue
+
+                # Gỡ máy ảo
+                post.vm_name = None
+                post.account_display = "Chưa chọn"
+
+                # Set status về draft nếu không có time
+                if not post.scheduled_time_vn:
+                    post.status = "draft"
+                else:
+                    # Có time nhưng không có VM → vẫn là draft
+                    post.status = "draft"
+
+                # Pause lại
+                post.is_paused = True
+                cleared_count += 1
+
+            # Save và reload
+            self.posts[:] = self.displayed_posts
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table(auto_sort=False)
+
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã gỡ bỏ máy ảo thành công!\n\n"
+                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                f"🗑️ Đã gỡ: {cleared_count} video",
+                parent=dialog
+            )
+            dialog.destroy()
+
         def on_apply():
             # Parse start and end index
             try:
@@ -2028,7 +2160,15 @@ class PostTab(ctk.CTkFrame):
             text="✅ Áp dụng",
             command=on_apply,
             **get_button_style("success"),
-            width=140
+            width=120
+        ).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="🗑️ Huỷ tất cả",
+            command=on_clear_all_vm,
+            **get_button_style("danger"),
+            width=120
         ).pack(side=tk.LEFT, padx=5)
 
         ctk.CTkButton(
@@ -2036,7 +2176,7 @@ class PostTab(ctk.CTkFrame):
             text="❌ Hủy",
             command=dialog.destroy,
             **get_button_style("secondary"),
-            width=140
+            width=120
         ).pack(side=tk.LEFT, padx=5)
 
         dialog.wait_window()
