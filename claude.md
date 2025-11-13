@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.7
+> **Phiên bản hiện tại:** v1.4.8
 
 ---
 
@@ -404,6 +404,66 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.4.8 - Major UX Improvement: Simplified controls & Fixed sorting behavior
+**File thay đổi:**
+- `tabs/tab_post.py`
+
+**Nội dung:**
+
+1. **✅ XÓA NÚT CHẠY/DỪNG Ở MỖI HÀNG**
+   - **Before:** Mỗi hàng có nút "▶ Chạy" / "⏸ Dừng"
+   - **After:** Chỉ dùng 2 nút "▶ Chạy tất cả" / "⏸ Dừng tất cả" ở trên
+   - **Xóa:**
+     - Cột "control" trong table
+     - Logic tạo control_button
+     - Function `toggle_post_control()`
+     - Xử lý click vào control column
+
+2. **🔒 CƠ CHẾ KHOÁ TABLE KHI CHẠY TẤT CẢ**
+   - **Thêm flag:** `self.is_running_all = False`
+   - **Khi nhấn "Chạy tất cả":**
+     - Set `is_running_all = True`
+     - Khoá table: Không cho edit thời gian, máy ảo, thêm/xóa videos
+     - Vẫn cho xem log (double-click)
+     - Trạng thái vẫn tự động cập nhật
+   - **Khi nhấn "Dừng tất cả":**
+     - Set `is_running_all = False`
+     - Mở khoá table: Có thể chỉnh sửa thoải mái
+   - **Block functions khi đang chạy:**
+     - `import_files()`, `import_folder()`, `import_channel()`
+     - `bulk_schedule()`, `bulk_assign_vm()`
+     - `delete_selected_videos()`
+     - `on_tree_click()` (trừ cột "log")
+   - **Warning message:** Hiện popup thông báo "Đang ở chế độ 'Chạy tất cả'!"
+
+3. **📍 FIX CƠ CHẾ SẮP XẾP TABLE**
+   - **Vấn đề cũ:** Mỗi khi edit thời gian → Table tự động sắp xếp lại → Video nhảy vị trí
+   - **Fix:** Thêm parameter `auto_sort=False` (mặc định) cho `load_posts_to_table()`
+   - **Behavior mới:**
+     - ❌ **Edit thông tin:** Giữ nguyên vị trí hàng (không sort)
+     - ✅ **Dùng nút lọc/sort:** Mới sắp xếp lại
+   - **Implementation:**
+     - `load_posts_to_table(auto_sort=False)` → Không sort
+     - `on_sort_change()` → `auto_sort=True`
+     - `toggle_sort_order()` → `auto_sort=True`
+     - Init lần đầu → `auto_sort=True`
+
+**Lý do:**
+- **Đơn giản hóa UX:** Giảm confusion, user chỉ cần dùng 2 nút chính
+- **Tăng control:** User kiểm soát rõ ràng khi nào được edit
+- **Fix annoying behavior:** Video không còn nhảy vị trí khi edit thời gian
+- **Tránh lỗi:** Không cho edit khi đang chạy → Tránh conflict
+
+**Impact:**
+- ✅ UI sạch hơn (bớt 1 cột trong table)
+- ✅ Workflow rõ ràng hơn: "Chạy tất cả" → Khoá → "Dừng tất cả" → Mở khoá
+- ✅ Giữ nguyên thứ tự videos khi edit
+- ✅ Chỉ sort khi user chủ động dùng nút lọc
+- ✅ Vẫn xem log được khi đang chạy
+- ✅ Trạng thái vẫn auto-update realtime
 
 ---
 

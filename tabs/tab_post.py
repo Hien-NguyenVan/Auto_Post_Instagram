@@ -790,6 +790,8 @@ class PostTab(ctk.CTkFrame):
         self.sort_by = "time"  # Mặc định sắp xếp theo thời gian: time, vm, status, name
         self.sort_order = "asc"  # asc = tăng dần, desc = giảm dần
         self.is_shutting_down = False  # Flag để track shutdown state
+        self.is_running_all = False  # Flag để track trạng thái "Chạy tất cả"
+        self.control_buttons = []  # List các buttons cần disable khi đang chạy
 
         # ✅ FIX BUG #1: Reset state khi load app
         # Khi app restart, force pause tất cả posts để tránh tự động chạy
@@ -804,7 +806,7 @@ class PostTab(ctk.CTkFrame):
         save_scheduled_posts(self.posts)
 
         self.build_ui()
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ✅ Sort lần đầu khi load app
         self.start_scheduler()
         self.after(200, self.process_ui_queue)
 
@@ -1030,7 +1032,7 @@ class PostTab(ctk.CTkFrame):
         table_frame.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
         # Treeview with ttk (CustomTkinter doesn't have table widget)
-        columns = ("checkbox", "stt", "video", "edit", "scheduled_time", "account", "status", "control", "log", "delete")
+        columns = ("checkbox", "stt", "video", "edit", "scheduled_time", "account", "status", "log", "delete")
 
         style = ttk.Style()
         style.theme_use("clam")
@@ -1071,7 +1073,6 @@ class PostTab(ctk.CTkFrame):
         self.tree.heading("scheduled_time", text="Thời Gian Đăng")
         self.tree.heading("account", text="Tài Khoản")
         self.tree.heading("status", text="Trạng Thái")
-        self.tree.heading("control", text="Dừng/Chạy")
         self.tree.heading("log", text="Log")
         self.tree.heading("delete", text="Xóa")
 
@@ -1083,7 +1084,6 @@ class PostTab(ctk.CTkFrame):
         self.tree.column("scheduled_time", width=130, anchor=tk.CENTER)
         self.tree.column("account", width=160)
         self.tree.column("status", width=110, anchor=tk.CENTER)
-        self.tree.column("control", width=80, anchor=tk.CENTER)
         self.tree.column("log", width=60, anchor=tk.CENTER)
         self.tree.column("delete", width=60, anchor=tk.CENTER)
 
@@ -1098,6 +1098,15 @@ class PostTab(ctk.CTkFrame):
 
     def import_files(self):
         """Import video files"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để import files."
+            )
+            return
+
         files = filedialog.askopenfilenames(
             title="Chọn video để đăng",
             filetypes=[
@@ -1111,6 +1120,15 @@ class PostTab(ctk.CTkFrame):
 
     def import_folder(self):
         """Import all videos from a folder"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để import folder."
+            )
+            return
+
         folder = filedialog.askdirectory(title="Chọn folder chứa video")
 
         if folder:
@@ -1128,6 +1146,15 @@ class PostTab(ctk.CTkFrame):
 
     def import_channel(self):
         """Import videos from YouTube or TikTok channel"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để import channel."
+            )
+            return
+
         # Dialog to select platform and input channel URL
         dialog = tk.Toplevel(self)
         dialog.title("Nhập kênh YouTube/TikTok")
@@ -1486,6 +1513,15 @@ class PostTab(ctk.CTkFrame):
 
     def bulk_schedule(self):
         """Lên lịch hàng loạt cho các video trong table - chỉ áp thời gian"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để lên lịch."
+            )
+            return
+
         # Lấy tất cả video trong table
         if not self.posts:
             messagebox.showinfo("Thông báo", "Không có video nào trong danh sách!")
@@ -1728,6 +1764,15 @@ class PostTab(ctk.CTkFrame):
 
     def bulk_assign_vm(self):
         """Đặt máy ảo hàng loạt cho các video trong table - chỉ áp máy ảo"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để đặt máy ảo."
+            )
+            return
+
         # Lấy tất cả video trong table
         if not self.posts:
             messagebox.showinfo("Thông báo", "Không có video nào trong danh sách!")
@@ -2357,49 +2402,60 @@ class PostTab(ctk.CTkFrame):
             f"Đã thêm {len(files)} video vào danh sách.\nClick vào cột ⚙️ để đặt lịch cho từng video."
         )
 
-    def load_posts_to_table(self):
-        """Load posts to table"""
+    def load_posts_to_table(self, auto_sort=False):
+        """Load posts to table
+
+        Args:
+            auto_sort: Nếu True, tự động sắp xếp theo self.sort_by.
+                      Nếu False, giữ nguyên thứ tự trong self.posts (không sort).
+                      Mặc định False để giữ nguyên vị trí khi edit.
+        """
         # Clear table
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Sắp xếp theo tiêu chí được chọn
-        if self.sort_by == "time":
-            # Sắp xếp theo thời gian (None values last)
-            sorted_posts = sorted(
-                self.posts,
-                key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
-                reverse=(self.sort_order == "desc")
-            )
-        elif self.sort_by == "vm":
-            # Sắp xếp theo máy ảo (None/empty last)
-            sorted_posts = sorted(
-                self.posts,
-                key=lambda p: (p.vm_name is None or p.vm_name == "", p.vm_name or ""),
-                reverse=(self.sort_order == "desc")
-            )
-        elif self.sort_by == "status":
-            # Sắp xếp theo trạng thái (draft, pending, processing, posted, failed)
-            status_order = {"draft": 0, "pending": 1, "processing": 2, "posted": 3, "failed": 4}
-            sorted_posts = sorted(
-                self.posts,
-                key=lambda p: status_order.get(p.status, 99),
-                reverse=(self.sort_order == "desc")
-            )
-        elif self.sort_by == "name":
-            # Sắp xếp theo tên video
-            sorted_posts = sorted(
-                self.posts,
-                key=lambda p: p.title.lower(),
-                reverse=(self.sort_order == "desc")
-            )
+        # ✅ CHỈ SORT khi auto_sort=True (khi user dùng nút lọc)
+        if auto_sort:
+            # Sắp xếp theo tiêu chí được chọn
+            if self.sort_by == "time":
+                # Sắp xếp theo thời gian (None values last)
+                sorted_posts = sorted(
+                    self.posts,
+                    key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
+                    reverse=(self.sort_order == "desc")
+                )
+            elif self.sort_by == "vm":
+                # Sắp xếp theo máy ảo (None/empty last)
+                sorted_posts = sorted(
+                    self.posts,
+                    key=lambda p: (p.vm_name is None or p.vm_name == "", p.vm_name or ""),
+                    reverse=(self.sort_order == "desc")
+                )
+            elif self.sort_by == "status":
+                # Sắp xếp theo trạng thái (draft, pending, processing, posted, failed)
+                status_order = {"draft": 0, "pending": 1, "processing": 2, "posted": 3, "failed": 4}
+                sorted_posts = sorted(
+                    self.posts,
+                    key=lambda p: status_order.get(p.status, 99),
+                    reverse=(self.sort_order == "desc")
+                )
+            elif self.sort_by == "name":
+                # Sắp xếp theo tên video
+                sorted_posts = sorted(
+                    self.posts,
+                    key=lambda p: p.title.lower(),
+                    reverse=(self.sort_order == "desc")
+                )
+            else:
+                # Mặc định: theo thời gian
+                sorted_posts = sorted(
+                    self.posts,
+                    key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
+                    reverse=(self.sort_order == "desc")
+                )
         else:
-            # Mặc định: theo thời gian
-            sorted_posts = sorted(
-                self.posts,
-                key=lambda p: (p.scheduled_time_vn is None, p.scheduled_time_vn or datetime.min.replace(tzinfo=VN_TZ)),
-                reverse=(self.sort_order == "desc")
-            )
+            # ✅ KHÔNG SORT: Giữ nguyên thứ tự hiện tại
+            sorted_posts = self.posts
 
         # Add to table
         for idx, post in enumerate(sorted_posts, start=1):
@@ -2419,17 +2475,6 @@ class PostTab(ctk.CTkFrame):
             else:
                 scheduled_time_display = "Chưa đặt"
 
-            # Xác định nút Start/Stop
-            if post.status == "posted":
-                control_button = "-"  # Đã đăng thành công, không cho phép gì
-            elif post.status == "draft":
-                control_button = "-"  # Chưa cấu hình thì chưa có nút
-            elif post.status == "processing":
-                control_button = "⏹ Dừng"  # Đang đăng, cho phép dừng
-            else:
-                # status = pending hoặc failed
-                control_button = "▶ Chạy" if post.is_paused else "⏸ Dừng"
-
             # Checkbox status
             checkbox_icon = "☑" if self.checked_posts.get(post.id, False) else "☐"
 
@@ -2447,7 +2492,6 @@ class PostTab(ctk.CTkFrame):
                     scheduled_time_display,
                     post.account_display,
                     status_icon,
-                    control_button,
                     "📋",
                     "✖"
                 ),
@@ -2499,92 +2543,31 @@ class PostTab(ctk.CTkFrame):
         if not post:
             return
 
+        # ✅ CHỈ CHO XEM LOG khi đang chạy tất cả
+        if self.is_running_all and col != "log":
+            messagebox.showwarning(
+                "Không thể chỉnh sửa",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để chỉnh sửa."
+            )
+            return
+
         if col == "checkbox":
             # Toggle checkbox
             self.checked_posts[post.id] = not self.checked_posts.get(post.id, False)
             self.load_posts_to_table()
         elif col == "edit":
             self.edit_post_config(post)
-        elif col == "control":
-            self.toggle_post_control(post)
         elif col == "log":
             self.open_log_window(post)
         elif col == "delete":
             self.delete_post(post)
 
-    def toggle_post_control(self, post: ScheduledPost):
-        """Toggle start/stop cho post"""
-        # Không cho phép toggle với draft hoặc posted
-        if post.status == "draft":
-            return
-
-        if post.status == "posted":
-            return
-
-        # Nếu đang processing → yêu cầu dừng ngay lập tức
-        if post.status == "processing":
-            confirm = messagebox.askyesno(
-                "Xác nhận dừng",
-                f"⚠️ Post đang trong quá trình đăng!\n\n"
-                f"Video: {post.title}\n\n"
-                f"Bạn có chắc muốn dừng ngay lập tức?\n"
-                f"(Máy ảo sẽ được tắt)"
-            )
-            if confirm:
-                post.stop_requested = True
-                post.log("🛑 Người dùng yêu cầu dừng ngay lập tức")
-
-                # Tắt máy ảo ngay lập tức để force stop
-                try:
-                    post.log("🔌 Đang tắt máy ảo...")
-                    subprocess.run(
-                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                        timeout=10
-                    )
-                    post.status = "failed"
-                    post.is_paused = True
-
-                    # Release VM lock if held
-                    vm_manager.release_vm(post.vm_name, caller=f"Stop:{post.title[:20]}")
-
-                    save_scheduled_posts(self.posts)
-                    self.load_posts_to_table()
-                    messagebox.showinfo("Đã dừng", "Đã dừng và tắt máy ảo thành công!")
-                except Exception as e:
-                    post.log(f"❌ Lỗi khi tắt VM: {e}")
-                    messagebox.showerror("Lỗi", f"Không thể tắt máy ảo: {e}")
-            return
-
-        # Nếu đang dừng và muốn chạy
-        if post.is_paused:
-            # Nếu là chế độ "Đăng ngay" → set thời gian = hiện tại
-            if post.post_now:
-                post.scheduled_time_vn = datetime.now(VN_TZ)
-                post.post_now = False  # Clear flag sau khi set time
-                post.log("⚡ Đăng ngay - Đã set thời gian = hiện tại")
-            else:
-                # Chế độ bình thường → kiểm tra thời gian phải là tương lai
-                now = datetime.now(VN_TZ)
-                if post.scheduled_time_vn and post.scheduled_time_vn <= now:
-                    messagebox.showerror(
-                        "Lỗi",
-                        f"⚠️ Không thể chạy vì thời gian đăng đã qua!\n\n"
-                        f"Thời gian đã đặt: {post.scheduled_time_vn.strftime('%d/%m/%Y %H:%M')}\n"
-                        f"Thời gian hiện tại: {now.strftime('%d/%m/%Y %H:%M')}\n\n"
-                        f"Vui lòng click vào ⚙️ để đặt lại thời gian."
-                    )
-                    return
-
-        # Toggle trạng thái
-        post.is_paused = not post.is_paused
-
-        # Lưu và refresh
-        save_scheduled_posts(self.posts)
-        self.load_posts_to_table()
-
     def run_all_videos(self):
         """Chạy tất cả video có thể chạy được (không hiện popup)"""
+        # ✅ Set flag để khoá table
+        self.is_running_all = True
+
         started_count = 0
         now = datetime.now(VN_TZ)
 
@@ -2624,6 +2607,9 @@ class PostTab(ctk.CTkFrame):
 
     def stop_all_videos(self):
         """Dừng tất cả video đang chạy (không hiện popup)"""
+        # ✅ Clear flag để mở khoá table
+        self.is_running_all = False
+
         stopped_count = 0
 
         for post in self.posts:
@@ -2649,6 +2635,15 @@ class PostTab(ctk.CTkFrame):
 
     def delete_selected_videos(self):
         """Xóa tất cả video đã được chọn checkbox"""
+        # ✅ Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để xóa videos."
+            )
+            return
+
         # Lấy danh sách post_id đã được chọn
         selected_ids = [post_id for post_id, checked in self.checked_posts.items() if checked]
 
@@ -2724,7 +2719,7 @@ class PostTab(ctk.CTkFrame):
         }
 
         self.sort_by = sort_map.get(selected, "time")
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ✅ Sort khi user chọn tiêu chí
 
     def toggle_sort_order(self):
         """Đổi chiều sắp xếp (tăng dần <-> giảm dần)"""
@@ -2735,7 +2730,7 @@ class PostTab(ctk.CTkFrame):
             self.sort_order = "asc"
             self.sort_order_btn.configure(text="⬆️ Tăng dần")
 
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ✅ Sort khi user đổi chiều
 
     def edit_post_config(self, post: ScheduledPost):
         """Edit post configuration (VM và thời gian)"""
