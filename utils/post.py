@@ -7,6 +7,8 @@ import time
 import uiautomator2 as u2
 
 from utils.base_instagram import BaseInstagramAutomation
+from utils.screenshot import take_screenshot
+from config import ADB_EXE
 from constants import (
     WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG,
     TIMEOUT_DEFAULT, TIMEOUT_APP_OPEN, TIMEOUT_SHORT,
@@ -36,6 +38,26 @@ class InstagramPost(BaseInstagramAutomation):
             log_callback: Optional callback function for logging (vm_name, message)
         """
         super().__init__(log_callback)
+
+    def _capture_failure_screenshot(self, adb_address: str, vm_name: str, reason: str):
+        """
+        Chụp màn hình khi automation thất bại để debug UI changes.
+
+        Args:
+            adb_address: ADB device address (e.g., "emulator-5554")
+            vm_name: Virtual machine name
+            reason: Lý do thất bại (để log)
+        """
+        try:
+            screenshot_path = take_screenshot(adb_address, ADB_EXE, vm_name)
+            if screenshot_path:
+                self.log(vm_name, f"📸 Screenshot đã lưu: {screenshot_path}")
+                self.log(vm_name, f"   💡 Lý do: {reason}")
+                self.log(vm_name, f"   🔍 Kiểm tra ảnh để xem Instagram có đổi UI không")
+            else:
+                self.log(vm_name, "⚠️ Không thể chụp screenshot")
+        except Exception as e:
+            self.log(vm_name, f"⚠️ Lỗi khi chụp screenshot: {e}")
 
     def auto_post(self, vm_name: str, adb_address: str, title: str, use_launchex: bool = False,
                   ldconsole_exe: str = None) -> bool:
@@ -97,6 +119,7 @@ class InstagramPost(BaseInstagramAutomation):
             if not self.wait_for_element(d, XPATH_FEED_TAB, timeout=TIMEOUT_APP_OPEN,
                                         vm_name=vm_name, description="feed tab"):
                 self.log(vm_name, "❌ Feed tab không xuất hiện", "ERROR")
+                self._capture_failure_screenshot(adb_address, vm_name, "Feed tab không xuất hiện - Instagram có thể đã đổi giao diện")
                 return False
 
             # Click allow button if exists
@@ -116,6 +139,7 @@ class InstagramPost(BaseInstagramAutomation):
                 self.log(vm_name, "Chuyển sang tab Profile")
                 if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG, vm_name=vm_name):
                     self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
+                    self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy Profile tab - UI có thể đã thay đổi")
                     return False
 
                 self.log(vm_name, "Chuyển sang tab feed tab")
@@ -151,12 +175,14 @@ class InstagramPost(BaseInstagramAutomation):
                     time.sleep(WAIT_SHORT)
                 else:
                     self.log(vm_name, f"❌ Không tìm thấy Create tab hoặc nút trái sau {MAX_RETRY_FIND_TAB} lần", "ERROR")
+                    self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy Create tab - Instagram có thể đã đổi layout")
                     return False
 
                 # Click "Create new post"
                 self.log(vm_name, "Nhấn Create new post")
                 if not self.safe_click(d, CONTENT_DESC_CREATE_POST, sleep_after=WAIT_LONG, vm_name=vm_name):
                     self.log(vm_name, "⚠️ Không tìm thấy nút Post", "WARNING")
+                    self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post - Menu có thể đã thay đổi")
                     return False
 
             # Click Next (top)
@@ -186,18 +212,21 @@ class InstagramPost(BaseInstagramAutomation):
             if not self.safe_send_text(d, XPATH_CAPTION_INPUT, title,
                                       sleep_after=WAIT_LONG, vm_name=vm_name):
                 self.log(vm_name, "❌ Không thể nhập caption", "ERROR")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy caption input - UI có thể đã thay đổi")
                 return False
 
             # Click OK button
             self.log(vm_name, "🔑 Nhấn OK")
             if not self.safe_click(d, XPATH_ACTION_BAR_TEXT, sleep_after=WAIT_LONG, vm_name=vm_name):
                 self.log(vm_name, "❌ Không tìm thấy nút OK", "ERROR")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút OK sau nhập caption")
                 return False
 
             # Click Share
             self.log(vm_name, "🔑 Nhấn Share")
             if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT, vm_name=vm_name, timeout=2):
                 self.log(vm_name, "❌ Không tìm thấy nút Share", "ERROR")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Share - UI upload có thể đã thay đổi")
                 return False
 
             # Click allow 
@@ -231,7 +260,8 @@ class InstagramPost(BaseInstagramAutomation):
                     break
                 
                 if d.xpath(XPATH_RETRY_MEDIA).exists:
-                    self.log( vm_name, "Đăng không thành công"  )
+                    self.log(vm_name, "❌ Đăng không thành công - Instagram từ chối post")
+                    self._capture_failure_screenshot(adb_address, vm_name, "Instagram từ chối đăng bài - Có thể video vi phạm guidelines hoặc UI thay đổi")
                     return False
 
                 time.sleep(WAIT_SHORT)

@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.3
+> **Phiên bản hiện tại:** v1.5.4
 
 ---
 
@@ -433,6 +433,67 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.4 - Add automatic screenshot on automation failure
+**File thay đổi:**
+- `utils/screenshot.py` (NEW)
+- `utils/post.py`
+
+**Nội dung:**
+- **✨ Feature mới:** Tự động chụp màn hình Instagram khi automation thất bại
+- **Use case:** Instagram thường cập nhật UI → Automation fail → Cần xem UI mới như thế nào
+- **Giải pháp:**
+  1. Tạo `utils/screenshot.py` với function `take_screenshot()`
+  2. Thêm method `_capture_failure_screenshot()` trong InstagramPost class
+  3. Gọi screenshot tại tất cả critical failure points
+
+**Screenshot được chụp khi:**
+- ❌ Feed tab không xuất hiện
+- ❌ Không tìm thấy Profile tab
+- ❌ Không tìm thấy Create tab sau retry
+- ❌ Không tìm thấy nút Post
+- ❌ Không nhập được caption
+- ❌ Không tìm thấy nút OK (sau caption)
+- ❌ Không tìm thấy nút Share
+- ❌ Instagram từ chối đăng bài (retry button xuất hiện)
+
+**Tính năng screenshot:**
+- 📁 Lưu tại: `D:/temp/`
+- 📝 Tên file: `{vm_name}-{port}-{timestamp}.png`
+  - Ví dụ: `test1-5554-20251113_145530.png`
+- 📸 Chụp qua ADB: `adb shell screencap -p`
+- 🔍 Log đường dẫn file + lý do failure
+- ⚡ Timeout 10s, không block automation flow
+
+**Log example:**
+```
+[14:55:30] ❌ Feed tab không xuất hiện
+[14:55:31] 📸 Screenshot đã lưu: D:/temp/test1-5554-20251113_145530.png
+[14:55:31]    💡 Lý do: Feed tab không xuất hiện - Instagram có thể đã đổi giao diện
+[14:55:31]    🔍 Kiểm tra ảnh để xem Instagram có đổi UI không
+```
+
+**Lý do:**
+- Instagram cập nhật UI thường xuyên → Automation bị break
+- Cần evidence hình ảnh để biết UI mới ra sao
+- Dễ dàng update XPath selectors dựa vào screenshot
+- Debug nhanh hơn: Nhìn ảnh là biết vấn đề
+
+**Impact:**
+- ✅ Tự động chụp màn hình khi fail (không cần manual)
+- ✅ Evidence cho mọi failure
+- ✅ Debug UI changes nhanh hơn
+- ✅ Dễ dàng update selectors khi Instagram đổi UI
+- ✅ Không ảnh hưởng performance (chỉ chụp khi fail)
+
+**Code changes:**
+- NEW: `utils/screenshot.py` - Screenshot utility module
+- `utils/post.py`:
+  - Import screenshot + ADB_EXE
+  - Add `_capture_failure_screenshot()` method
+  - Add screenshot calls at 8 critical failure points
 
 ---
 
