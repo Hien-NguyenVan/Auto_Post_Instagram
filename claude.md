@@ -393,6 +393,35 @@ with Timer("Operation name"):
 
 ---
 
+## ⚠️ KNOWN ISSUES & TODO
+
+### 🔴 Priority: High
+
+#### 1. **Stop video đang processing không có cơ chế clean**
+**Vấn đề:**
+- Khi nhấn "Dừng tất cả", video `status="processing"` (đang đăng bài) sẽ bị bỏ qua
+- Không có cách nào dừng video đang processing một cách clean và ổn định
+- Nếu force stop Instagram app → Có thể để lại draft, thread sẽ exception
+
+**Impact:**
+- User phải đợi video processing hoàn tất (1-3 phút) mới mở khóa table
+- Không thể cancel video bị stuck
+- Confusion: "Dừng tất cả" nhưng vẫn thấy "🔄 Đang đăng"
+
+**Giải pháp đề xuất:**
+- **Option 1 (Graceful):** Thêm `cancel_event` + checkpoint checks trong automation flow
+- **Option 2 (Force):** Force stop Instagram app (nhanh nhưng không clean)
+- **Option 3 (Nuclear):** Quit VM (chắc chắn nhưng phải reboot VM)
+- **Option 4 (Hybrid):** Thử graceful → Timeout → Hỏi user chọn force/wait/cancel
+
+**Status:** Pending - Sẽ implement sau
+
+**File liên quan:** `tabs/tab_post.py` (stop_all_videos), `utils/post.py` (auto_post)
+
+**Date noted:** 2025-11-13
+
+---
+
 ## 📝 CHANGELOG - GHI CHÚ CẬP NHẬT
 
 > **Hướng dẫn:** Mỗi lần chỉnh sửa/cập nhật project, thêm entry mới vào đây với format:
