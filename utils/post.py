@@ -239,11 +239,10 @@ class InstagramPost(BaseInstagramAutomation):
                     return False
 
             self.log(vm_name, "Nhấn post")
-            if not self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT,
-                                  vm_name=vm_name, description="Post selector button"):
-                self.log(vm_name, "⚠️ Không tìm thấy nút post", "WARNING")
-                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post")
-                return False
+            self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT,
+                                  vm_name=vm_name, description="Post selector button")
+                # self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post")
+                # return False
 
             # Kiểm tra có file trong gallery hay chưa
             self.log(vm_name, "🔍 Kiểm tra file trong gallery...")

@@ -74,6 +74,7 @@ RESOURCE_SHARE_TO = "com.instagram.android:id/clips_nux_sheet_share_button"
 RESOURCE_FIRST_BOX = "com.instagram.android:id/gallery_grid_item_thumbnail"
 RESOURCE_progress_bar = "com.instagram.android:id/row_pending_container"
 
+
 # XPath for resource IDs (formatted)
 XPATH_FEED_TAB = f'//*[@resource-id="{RESOURCE_ID_FEED_TAB}"]'
 XPATH_CREATE_POST = f'//*[@resource-id="{RESOURCE_ID_CREATE_POST}"]'
