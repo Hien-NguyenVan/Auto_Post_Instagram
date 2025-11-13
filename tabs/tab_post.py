@@ -1530,7 +1530,7 @@ class PostTab(ctk.CTkFrame):
         # Dialog - CustomTkinter style
         dialog = ctk.CTkToplevel(self)
         dialog.title("Lên lịch hàng loạt")
-        dialog.geometry("550x420")
+        dialog.geometry("550x530")
         dialog.grab_set()
         dialog.configure(fg_color=COLORS["bg_primary"])
 
@@ -1787,7 +1787,7 @@ class PostTab(ctk.CTkFrame):
         # Dialog - CustomTkinter style
         dialog = ctk.CTkToplevel(self)
         dialog.title("Đặt máy ảo hàng loạt")
-        dialog.geometry("600x550")
+        dialog.geometry("600x700")
         dialog.grab_set()
         dialog.configure(fg_color=COLORS["bg_primary"])
 
@@ -2459,13 +2459,19 @@ class PostTab(ctk.CTkFrame):
 
         # Add to table
         for idx, post in enumerate(sorted_posts, start=1):
-            status_icon = {
-                "draft": "⚙️ Chưa cấu hình",
-                "pending": "⏳ Chờ",
-                "processing": "🔄 Đang đăng",
-                "posted": "✅ Đã đăng",
-                "failed": "❌ Thất bại"
-            }.get(post.status, post.status)
+            # ✅ Phân biệt trạng thái pending dựa vào is_paused
+            if post.status == "pending":
+                if post.is_paused:
+                    status_icon = "⏸ Đã dừng"  # Chưa nhấn "Chạy tất cả" hoặc đã dừng
+                else:
+                    status_icon = "⏳ Chờ đăng"  # Đã nhấn "Chạy tất cả", đang chờ đến giờ
+            else:
+                status_icon = {
+                    "draft": "⚙️ Chưa cấu hình",
+                    "processing": "🔄 Đang đăng",
+                    "posted": "✅ Đã đăng",
+                    "failed": "❌ Thất bại"
+                }.get(post.status, post.status)
 
             # Hiển thị thời gian
             if post.post_now:
@@ -2509,13 +2515,14 @@ class PostTab(ctk.CTkFrame):
         # Cập nhật label đếm số lượng video
         total = len(self.posts)
         draft = sum(1 for p in self.posts if p.status == "draft")
-        pending = sum(1 for p in self.posts if p.status == "pending")
+        pending_paused = sum(1 for p in self.posts if p.status == "pending" and p.is_paused)
+        pending_running = sum(1 for p in self.posts if p.status == "pending" and not p.is_paused)
         processing = sum(1 for p in self.posts if p.status == "processing")
         posted = sum(1 for p in self.posts if p.status == "posted")
         failed = sum(1 for p in self.posts if p.status == "failed")
 
         self.count_label.configure(
-            text=f"📊 Tổng: {total} | ⚙️ Chưa cấu hình: {draft} | ⏳ Chờ: {pending} | "
+            text=f"📊 Tổng: {total} | ⚙️ Chưa cấu hình: {draft} | ⏸ Đã dừng: {pending_paused} | ⏳ Chờ đăng: {pending_running} | "
                  f"🔄 Đang đăng: {processing} | ✅ Đã đăng: {posted} | ❌ Thất bại: {failed}"
         )
 

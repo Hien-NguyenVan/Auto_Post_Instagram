@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.8
+> **Phiên bản hiện tại:** v1.4.9
 
 ---
 
@@ -404,6 +404,40 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.4.9 - Improved status display: Distinguish paused vs waiting
+**File thay đổi:**
+- `tabs/tab_post.py`
+
+**Nội dung:**
+- **Vấn đề cũ:** Status "⏳ Chờ" quá chung chung, không phân biệt được:
+  - Chờ khi đã nhấn "Chạy tất cả" (sẽ chạy khi đến giờ)
+  - Chờ khi chưa nhấn "Chạy tất cả" (đang dừng)
+- **Fix:** Phân biệt status dựa vào `is_paused`:
+  - `status = "pending"` + `is_paused = True` → **"⏸ Đã dừng"**
+  - `status = "pending"` + `is_paused = False` → **"⏳ Chờ đăng"**
+- **Update count label:** Hiển thị tách riêng:
+  - "⏸ Đã dừng: X"
+  - "⏳ Chờ đăng: Y"
+
+**Lý do:**
+- User cần biết video nào đang active (sẽ tự động đăng) vs video nào đang paused
+- Tăng clarity trong quản lý videos
+
+**Impact:**
+- ✅ Rõ ràng hơn: Nhìn vào trạng thái biết ngay video có chạy không
+- ✅ Count label chi tiết hơn
+- ✅ Dễ troubleshoot: Biết tại sao video không đăng
+
+**Danh sách trạng thái đầy đủ:**
+1. **⚙️ Chưa cấu hình** - draft
+2. **⏸ Đã dừng** - pending + paused
+3. **⏳ Chờ đăng** - pending + running
+4. **🔄 Đang đăng** - processing
+5. **✅ Đã đăng** - posted
+6. **❌ Thất bại** - failed
 
 ---
 
