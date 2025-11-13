@@ -15,7 +15,7 @@ from constants import (
     XPATH_PROFILE_TAB, XPATH_NEXT_BUTTON, XPATH_RETRY_MEDIA, XPATH_RIGHT_ACTION,
     XPATH_DOWNLOAD_NUX, XPATH_PRIMARY_ACTION, XPATH_CAPTION_INPUT,
     XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,
-    XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,XPATH_container_left,
+    XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,
     CONTENT_DESC_CREATE_NEW, CONTENT_DESC_CREATE_POST,
     CHROME_PACKAGE, INSTAGRAM_PACKAGE, RESOURCE_ID_LEFT_ACTION
 )
@@ -108,8 +108,8 @@ class InstagramPost(BaseInstagramAutomation):
             if self.wait_for_element(d, XPATH_CREATE_POST,vm_name=vm_name,description="create post", timeout=WAIT_LONG ):
                 self.safe_click(d, XPATH_CREATE_POST, sleep_after=WAIT_LONG,
                           vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
-            elif self.wait_for_element(d, XPATH_container_left,vm_name=vm_name,description="create post", timeout=WAIT_MEDIUM ):
-                self.safe_click(d, XPATH_container_left, sleep_after=WAIT_LONG,
+            elif self.wait_for_element(d, XPATH_ACTION_LEFT_CONTAINER,vm_name=vm_name,description="create post", timeout=WAIT_MEDIUM ):
+                self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG,
                           vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
             else:
                 # Go to profile tab
