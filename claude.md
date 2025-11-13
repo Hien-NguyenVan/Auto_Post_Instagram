@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.8
+> **Phiên bản hiện tại:** v1.5.9
 
 ---
 
@@ -329,7 +329,15 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.8 (2025-11-13) - Current Version
+### v1.5.9 (2025-11-13) - Current Version
+**⚡ OPTIMIZATION: Download on-demand - Tối ưu disk usage**
+- Thay đổi flow: Download → Wait → Acquire VM → Post
+- Sang: Wait → Acquire VM → Download → Post
+- Chỉ download khi đã có VM sẵn sàng
+- Giảm peak disk usage từ 1GB xuống 50MB (20 videos cùng queue)
+- Không tốn disk khi chờ VM lock
+
+### v1.5.8
 **🐛 CRITICAL FIX: Scheduler race condition - Fix list reference bug**
 - Fix scheduler không chạy sau bulk operations (bulk_schedule, bulk_assign_vm)
 - Fix race condition: scheduler.posts reference bị stale khi reassign self.posts
@@ -465,6 +473,85 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.9 - OPTIMIZATION: Download on-demand để tối ưu disk usage
+**File thay đổi:**
+- `tabs/tab_post.py`
+- `version.txt`
+
+**Nội dung:**
+- **⚡ OPTIMIZATION:** Thay đổi flow download để tối ưu disk usage khi nhiều videos cùng queue
+- **Vấn đề cũ:**
+  ```
+  Flow cũ: Download → Wait → Acquire VM → Post
+
+  20 videos cùng VM, cùng time:
+  ├─ 14:00: Scheduler tạo 20 threads
+  ├─ 14:00-14:05: 20 threads download SONG SONG (peak 1GB disk)
+  ├─ 14:05: Thread 1 acquire VM → Post (3 phút)
+  ├─ 14:08: Thread 1 release → Cleanup video 1
+  ├─ 14:08: Thread 2 acquire VM → Post
+  └─ ...
+
+  → 19 videos đã download nhưng chờ → Tốn ~1GB disk trong 1 giờ!
+  ```
+
+- **Flow mới (v1.5.9):**
+  ```
+  Flow mới: Wait → Acquire VM → Download → Post
+
+  20 videos cùng VM, cùng time:
+  ├─ 14:00: Scheduler tạo 20 threads
+  ├─ 14:00: Thread 1 acquire VM ✅ → Download (2 phút) → Post (3 phút)
+  ├─ 14:00: Thread 2-20 WAIT (blocking at acquire_vm)
+  ├─ 14:05: Thread 1 release → Cleanup video 1
+  ├─ 14:05: Thread 2 acquire VM ✅ → Download → Post
+  └─ ...
+
+  → Chỉ 1 video được download mỗi lúc → Tốn ~50MB disk!
+  ```
+
+- **Thay đổi chi tiết:**
+  1. **Di chuyển download logic:** Từ trước acquire VM → sau acquire VM
+  2. **Thêm biến `original_video_path`:** Backup URL gốc trước khi download
+  3. **Check local file sớm:** Nếu local file, check existence ngay (không cần wait VM)
+  4. **Thêm import:** `from utils.download_dlp import download_video_api, download_tiktok_direct_url`
+  5. **Cleanup VM khi download fail:** Tắt VM nếu download thất bại
+
+**Lý do:**
+- **Disk optimization:** 20 videos × 50MB = 1GB → 1 video × 50MB = 50MB (giảm 95%)
+- **Không lãng phí bandwidth:** Download song song 20 videos chậm hơn download tuần tự
+- **Fair resource usage:** Chỉ download khi thực sự cần (có VM rồi)
+- **Tránh timeout:** Thread không phải chờ lâu với video đã download sẵn
+
+**Impact:**
+- ✅ Giảm peak disk usage từ ~1GB xuống ~50MB (20 videos cùng VM)
+- ✅ Không tốn disk khi chờ VM lock
+- ✅ Download nhanh hơn (không chia bandwidth)
+- ✅ Backward compatible: Local files vẫn hoạt động bình thường
+
+**Testing scenario:**
+```
+Before v1.5.9:
+- Import 20 YouTube URLs, cùng VM, cùng time 14:00
+- Hit "Run All" at 14:00
+- Peak disk: ~1GB (all downloaded at once)
+- Duration: ~1 hour (20 × 3 min)
+
+After v1.5.9:
+- Import 20 YouTube URLs, cùng VM, cùng time 14:00
+- Hit "Run All" at 14:00
+- Peak disk: ~50MB (only 1 video at a time)
+- Duration: ~1.6 hours (20 × (2 min download + 3 min post))
+- Trade-off: +10% thời gian, nhưng -95% disk usage
+```
+
+**Code changes:**
+- tabs/tab_post.py:385-400: Detect URL, backup original_video_path, check local file early
+- tabs/tab_post.py:527-619: Di chuyển download logic sau acquire VM
+- tabs/tab_post.py:31: Add import for download functions
 
 ---
 

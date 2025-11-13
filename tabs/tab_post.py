@@ -28,6 +28,7 @@ from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
+from utils.download_dlp import download_video_api, download_tiktok_direct_url
 from utils.api_manager_multi import multi_api_manager
 from utils.yt_api import (
     check_api_key_valid,
@@ -382,78 +383,15 @@ class PostScheduler(threading.Thread):
                 save_scheduled_posts(self.posts)
                 return
 
-            # Check if video_path is a URL or local file
+            # ⚡ v1.5.9 OPTIMIZATION: Detect if URL (KHÔNG download ngay) để tối ưu disk usage
+            # Flow mới: Wait → Acquire VM → Download → Post
+            # Thay vì: Download → Wait → Acquire VM → Post
             is_url = post.video_path.startswith("http")
             temp_video_path = None
+            original_video_path = post.video_path  # Backup URL/path gốc
 
-            if is_url:
-                # Detect platform from URL
-                # If contains youtube.com or youtu.be -> YouTube
-                # Otherwise -> TikTok (default)
-                is_youtube = "youtube.com" in post.video_path or "youtu.be" in post.video_path
-
-                if is_youtube:
-                    # Download YouTube video
-                    post.log(f"📥 Đang tải video YouTube từ URL...")
-                    try:
-                        video_path = download_video_api(
-                            post.video_path,
-                            log_callback=lambda msg: post.log(msg)
-                        )
-
-                        if not video_path or not os.path.exists(video_path):
-                            post.log(f"❌ Không thể tải video YouTube")
-                            post.status = "failed"
-                            self.ui_queue.put(("status_update", post.id, "failed"))
-                            self.running_posts.discard(post.id)
-                            save_scheduled_posts(self.posts)
-                            return
-
-                        post.log(f"✅ Đã tải video YouTube: {os.path.basename(video_path)}")
-                        temp_video_path = video_path  # Mark for cleanup later
-                        post.video_path = video_path  # Update to local path
-
-                    except Exception as e:
-                        post.log(f"❌ Lỗi khi tải video YouTube: {e}")
-                        post.status = "failed"
-                        self.ui_queue.put(("status_update", post.id, "failed"))
-                        self.running_posts.discard(post.id)
-                        save_scheduled_posts(self.posts)
-                        return
-
-                else:
-                    # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
-                    post.log(f"📥 Đang tải video TikTok từ URL...")
-                    try:
-                        video_path = download_tiktok_direct_url(
-                            post.video_path,
-                            log_callback=lambda msg: post.log(msg)
-                        )
-
-                        if not video_path or not os.path.exists(video_path):
-                            post.log(f"❌ Không thể tải video TikTok")
-                            post.status = "failed"
-                            self.ui_queue.put(("status_update", post.id, "failed"))
-                            self.running_posts.discard(post.id)
-                            save_scheduled_posts(self.posts)
-                            return
-
-                        post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
-                        temp_video_path = video_path  # Mark for cleanup later
-                        post.video_path = video_path  # Update to local path
-
-                    except Exception as e:
-                        post.log(f"❌ Lỗi khi tải video TikTok: {e}")
-                        post.status = "failed"
-                        self.ui_queue.put(("status_update", post.id, "failed"))
-                        self.running_posts.discard(post.id)
-                        save_scheduled_posts(self.posts)
-                        return
-
-                time.sleep(WAIT_SHORT)
-
-            else:
-                # Check if local video file exists
+            # Nếu local file, check existence ngay (vì không cần download)
+            if not is_url:
                 if not os.path.exists(post.video_path):
                     post.log(f"❌ File video không tồn tại: {post.video_path}")
                     post.status = "failed"
@@ -586,6 +524,100 @@ class PostScheduler(threading.Thread):
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
+
+            # ⚡ v1.5.9: DOWNLOAD VIDEO SAU KHI ACQUIRE VM (tối ưu disk usage)
+            # Flow mới: Chỉ download khi đã có VM sẵn sàng → Không tốn disk khi chờ
+            if is_url:
+                # Detect platform from URL
+                is_youtube = "youtube.com" in original_video_path or "youtu.be" in original_video_path
+
+                if is_youtube:
+                    # Download YouTube video
+                    post.log(f"📥 Đang tải video YouTube từ URL...")
+                    try:
+                        video_path = download_video_api(
+                            original_video_path,
+                            log_callback=lambda msg: post.log(msg)
+                        )
+
+                        if not video_path or not os.path.exists(video_path):
+                            post.log(f"❌ Không thể tải video YouTube")
+                            post.status = "failed"
+                            self.ui_queue.put(("status_update", post.id, "failed"))
+                            self.running_posts.discard(post.id)
+                            save_scheduled_posts(self.posts)
+                            # Cleanup VM
+                            subprocess.run(
+                                [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+                            vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                            time.sleep(WAIT_EXTRA_LONG)
+                            return
+
+                        post.log(f"✅ Đã tải video YouTube: {os.path.basename(video_path)}")
+                        temp_video_path = video_path  # Mark for cleanup later
+                        post.video_path = video_path  # Update to local path
+
+                    except Exception as e:
+                        post.log(f"❌ Lỗi khi tải video YouTube: {e}")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        # Cleanup VM
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                        time.sleep(WAIT_EXTRA_LONG)
+                        return
+
+                else:
+                    # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
+                    post.log(f"📥 Đang tải video TikTok từ URL...")
+                    try:
+                        video_path = download_tiktok_direct_url(
+                            original_video_path,
+                            log_callback=lambda msg: post.log(msg)
+                        )
+
+                        if not video_path or not os.path.exists(video_path):
+                            post.log(f"❌ Không thể tải video TikTok")
+                            post.status = "failed"
+                            self.ui_queue.put(("status_update", post.id, "failed"))
+                            self.running_posts.discard(post.id)
+                            save_scheduled_posts(self.posts)
+                            # Cleanup VM
+                            subprocess.run(
+                                [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+                            vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                            time.sleep(WAIT_EXTRA_LONG)
+                            return
+
+                        post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
+                        temp_video_path = video_path  # Mark for cleanup later
+                        post.video_path = video_path  # Update to local path
+
+                    except Exception as e:
+                        post.log(f"❌ Lỗi khi tải video TikTok: {e}")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        # Cleanup VM
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                        time.sleep(WAIT_EXTRA_LONG)
+                        return
+
+                time.sleep(WAIT_SHORT)
 
             # Clear DCIM and Pictures folders before sending file
             post.log(f"🗑️ Xóa DCIM và Pictures...")
