@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.12
+> **Phiên bản hiện tại:** v1.5.13
 
 ---
 
@@ -495,6 +495,38 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.13 - Fix table không cập nhật khi xóa video
+**File thay đổi:**
+- `tabs/tab_post.py`
+- `version.txt`
+- `claude.md`
+
+**Nội dung:**
+- **🐛 Bug Fix:** Khi xóa video, scheduler đã xóa (JSON updated) nhưng table UI vẫn hiển thị videos đã xóa
+- **Nguyên nhân:**
+  - `delete_selected_videos()` gọi `load_posts_to_table()` với `auto_sort=False` (mặc định)
+  - Khi `auto_sort=False`, `load_posts_to_table()` dùng `self.displayed_posts` (thứ tự cũ)
+  - Nhưng `self.displayed_posts` không được update sau khi xóa → Table vẫn load từ list cũ
+- **Fix:**
+  - Thêm logic update `self.displayed_posts` sau khi xóa khỏi `self.posts` (line 2881-2883)
+  - Đảm bảo cả 2 lists đều sync sau delete operation
+
+**Lý do:**
+- Đồng bộ `self.posts` và `self.displayed_posts` là critical để UI reflect đúng data
+- Giữ được thứ tự sort hiện tại (không jump về thứ tự mặc định)
+
+**Impact:**
+- ✅ Table cập nhật đúng ngay sau khi xóa video
+- ✅ Giữ nguyên thứ tự sort hiện tại
+- ✅ Sync hoàn hảo giữa data và UI
+
+**Code changes:**
+- tabs/tab_post.py:2881-2883: Update displayed_posts sau khi xóa
+- version.txt: v1.5.12 → v1.5.13
+- claude.md: Update version và changelog
 
 ---
 

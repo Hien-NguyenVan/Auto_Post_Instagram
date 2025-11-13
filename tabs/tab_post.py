@@ -2878,6 +2878,10 @@ class PostTab(ctk.CTkFrame):
         # ⚠️ CRITICAL FIX v1.5.8: Dùng slice assignment để modify in-place
         self.posts[:] = [post for post in self.posts if post.id not in selected_ids]
 
+        # ✅ FIX v1.5.13: Cập nhật displayed_posts để sync với posts
+        if hasattr(self, 'displayed_posts') and self.displayed_posts:
+            self.displayed_posts = [post for post in self.displayed_posts if post.id not in selected_ids]
+
         # Xóa khỏi checked_posts
         for post_id in selected_ids:
             if post_id in self.checked_posts:
