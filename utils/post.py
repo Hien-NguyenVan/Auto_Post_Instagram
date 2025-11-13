@@ -4,6 +4,7 @@ Instagram post automation module.
 Handles automatic Instagram post creation using UIAutomator2.
 """
 import time
+import subprocess
 import uiautomator2 as u2
 
 from utils.base_instagram import BaseInstagramAutomation
@@ -16,8 +17,8 @@ from constants import (
     XPATH_INSTAGRAM_APP, XPATH_FEED_TAB, XPATH_PROMO_BUTTON, XPATH_CREATE_POST,
     XPATH_PROFILE_TAB, XPATH_NEXT_BUTTON, XPATH_RETRY_MEDIA, XPATH_RIGHT_ACTION,
     XPATH_DOWNLOAD_NUX, XPATH_PRIMARY_ACTION, XPATH_CAPTION_INPUT,
-    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,
-    XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,
+    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,XPATH_SHARE_TO,
+    XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,XPATH_POST,XPATH_FIRST_BOX,XPATH_progress_bar,
     CONTENT_DESC_CREATE_NEW, CONTENT_DESC_CREATE_POST,
     CHROME_PACKAGE, INSTAGRAM_PACKAGE, RESOURCE_ID_LEFT_ACTION
 )
@@ -38,6 +39,47 @@ class InstagramPost(BaseInstagramAutomation):
             log_callback: Optional callback function for logging (vm_name, message)
         """
         super().__init__(log_callback)
+
+    def _retry_mediastore_broadcast(self, adb_address: str, video_filename: str, vm_name: str, max_retries: int = 3):
+        """
+        Retry broadcast MediaStore để Gallery/Instagram nhận ra file.
+
+        Args:
+            adb_address: ADB device address (e.g., "emulator-5554")
+            video_filename: Video filename (e.g., 'video.mp4')
+            vm_name: Virtual machine name
+            max_retries: Maximum number of retries (default: 3)
+
+        Returns:
+            bool: True if broadcast successful
+        """
+        if not video_filename:
+            self.log(vm_name, "⚠️ Không có video_filename để retry broadcast")
+            return False
+
+        remote_path = f"/sdcard/DCIM/{video_filename}"
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.log(vm_name, f"🔁 Retry broadcast MediaStore (lần {attempt}/{max_retries})...")
+                subprocess.run([
+                    ADB_EXE, "-s", adb_address, "shell",
+                    "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                    "-d", f"file://{remote_path}"
+                ],
+                capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10
+                )
+                self.log(vm_name, f"✅ Đã retry broadcast MediaStore (lần {attempt})")
+                time.sleep(2)  # Đợi MediaStore update
+                return True
+            except Exception as e:
+                self.log(vm_name, f"⚠️ Lỗi retry broadcast (lần {attempt}): {e}")
+                if attempt < max_retries:
+                    time.sleep(1)
+
+        return False
 
     def _capture_failure_screenshot(self, adb_address: str, vm_name: str, reason: str):
         """
@@ -60,7 +102,7 @@ class InstagramPost(BaseInstagramAutomation):
             self.log(vm_name, f"⚠️ Lỗi khi chụp screenshot: {e}")
 
     def auto_post(self, vm_name: str, adb_address: str, title: str, use_launchex: bool = False,
-                  ldconsole_exe: str = None) -> bool:
+                  ldconsole_exe: str = None, video_filename: str = None) -> bool:
         """
         Automatically post a video to Instagram.
 
@@ -70,6 +112,7 @@ class InstagramPost(BaseInstagramAutomation):
             title: Post title/caption
             use_launchex: If True, use ldconsole launchex instead of clicking Instagram app
             ldconsole_exe: Path to ldconsole.exe (required if use_launchex=True)
+            video_filename: Video filename (e.g., 'video.mp4') for MediaStore broadcast retry
 
         Returns:
             bool: True if post successful
@@ -185,16 +228,49 @@ class InstagramPost(BaseInstagramAutomation):
                     self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post - Menu có thể đã thay đổi")
                     return False
 
+            self.log(vm_name, "Nhấn post")
+            if not self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT, vm_name=vm_name):
+                self.log(vm_name, "⚠️ Không tìm thấy nút post", "WARNING")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post")
+                return False
+
+            # Kiểm tra có file trong gallery hay chưa
+            self.log(vm_name, "🔍 Kiểm tra file trong gallery...")
+            if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box", timeout=WAIT_SHORT):
+                # File chưa xuất hiện trong gallery → Retry broadcast MediaStore
+                self.log(vm_name, "⚠️ File chưa xuất hiện trong gallery")
+                if video_filename:
+                    self.log(vm_name, "🔄 Đang retry broadcast MediaStore...")
+                    self._retry_mediastore_broadcast(adb_address, video_filename, vm_name, max_retries=3)
+
+                    # Kiểm tra lại sau khi retry
+                    if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box", timeout=WAIT_MEDIUM):
+                        self.log(vm_name, "❌ File vẫn không xuất hiện sau khi retry broadcast")
+                        self._capture_failure_screenshot(adb_address, vm_name, "File không xuất hiện trong gallery sau retry broadcast")
+                        return False
+                    else:
+                        self.log(vm_name, "✅ File đã xuất hiện sau khi retry broadcast")
+                else:
+                    self.log(vm_name, "❌ Không có video_filename để retry broadcast")
+                    self._capture_failure_screenshot(adb_address, vm_name, "File không xuất hiện và không có filename để retry")
+                    return False
+            else:
+                self.log(vm_name, "✅ File đã có trong gallery")
+
+
+            time.sleep(3)
             # Click Next (top)
             self.log(vm_name, "Nhấn Next (trên)")
             if not self.safe_click(d, XPATH_NEXT_BUTTON, sleep_after=WAIT_LONG, vm_name=vm_name):
                 self.log(vm_name, "⚠️ Không tìm thấy nút Next trên", "WARNING")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút next trên")
                 return False
 
             # Click Next (bottom)
             self.log(vm_name, "Nhấn Next (dưới)")
             if not self.safe_click(d, XPATH_RIGHT_ACTION, sleep_after=WAIT_LONG, vm_name=vm_name):
                 self.log(vm_name, "⚠️ Không tìm thấy nút Next dưới", "WARNING")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút next dưới")
                 return False
 
             # Click Continue if exists
@@ -235,16 +311,20 @@ class InstagramPost(BaseInstagramAutomation):
                           vm_name=vm_name, optional=True, timeout=2)
             # Click Share 2
             self.log(vm_name, "🔑 Nhấn Share 2")
-            self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
-                          vm_name=vm_name, optional=True, timeout=2)
-            
-            # Click Share 3
-            self.log(vm_name, "🔑 Nhấn Share 3")
-            self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
-                          vm_name=vm_name, optional=True, timeout=2)
+            if self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=2):
+                # Click Share 3
+                self.log(vm_name, "🔑 Nhấn Share 3")
+                self.safe_click(d, XPATH_SHARE_BUTTON_2, sleep_after=1,
+                            vm_name=vm_name, optional=True, timeout=2)
             # Click allow 
             self.log(vm_name, "🔑 Nhấn allow")
             self.safe_click(d, XPATH_ALLOW_2, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=2)
+                          
+            # Click SHARE TO
+            self.log(vm_name, "🔑 Nhấn ashare to")
+            self.safe_click(d, XPATH_SHARE_TO, sleep_after=1,
                           vm_name=vm_name, optional=True, timeout=2)
 
             # Click "No thanks" if exists
@@ -255,6 +335,10 @@ class InstagramPost(BaseInstagramAutomation):
             # Wait for post notification
             self.log(vm_name, "⏳ Chờ đăng bài...")
             for i in range(MAX_RETRY_POST_NOTIFICATION):
+                if not d.xpath(XPATH_progress_bar).exists:
+                    self.log(vm_name, "✅ Đã có thông báo đăng bài!")
+                    break
+                
                 if d.xpath(XPATH_PENDING_MEDIA).exists:
                     self.log(vm_name, "✅ Đã có thông báo đăng bài!")
                     break

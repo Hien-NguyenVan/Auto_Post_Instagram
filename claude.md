@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.5
+> **Phiên bản hiện tại:** v1.5.7
 
 ---
 
@@ -329,7 +329,31 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.4.5 (2025-11-13) - Current Version
+### v1.5.7 (2025-11-13) - Current Version
+**✨ MediaStore Broadcast Retry - Intelligent gallery file detection**
+- Thêm retry mechanism cho MediaStore broadcast khi file chưa xuất hiện trong gallery
+- Implement `_retry_mediastore_broadcast()` method với tối đa 3 lần retry
+- Thêm parameter `video_filename` vào `auto_post()` để support retry broadcast
+- Fail-fast behavior: Dừng ngay nếu file không xuất hiện sau 3 lần retry + screenshot
+- Tăng độ tin cậy posting: Đảm bảo file có trong gallery trước khi tiếp tục
+- Defensive approach thay vì optimistic: Kiểm tra chặt chẽ trước khi thao tác
+
+### v1.5.6
+**🐛 Fix device offline error by checking ADB state properly**
+- Improved `wait_adb_ready()` to parse and validate device state from 'adb devices' output
+- Parse device state column (device/offline/unauthorized) instead of just checking presence
+- Only return success when state is "device", not when offline or unauthorized
+- Log device state changes in real-time to help debug connection issues
+- Prevents race condition where device appears in list but isn't ready for file operations
+
+### v1.5.5
+**🐛 Remove all hardcoded ADB paths, use config auto-detection**
+- Fix critical bug: Hardcoded `adb_path = r"C:\LDPlayer\LDPlayer9\adb.exe"` fails cho users cài LDPlayer ở D:\ hoặc E:\
+- Update `send_file.py` và `delete_file.py` để dùng `ADB_EXE` từ config
+- Thêm fallback mechanism: `if adb_path is None: adb_path = ADB_EXE`
+- Fix `[WinError 2] The system cannot find the file specified` cho all users
+
+### v1.4.5
 **🔧 Đồng bộ cleanup giữa tab_post và tab_follow**
 - Implement cleanup() method cho FollowTab (critical fix)
 - Fix shared InstagramPost trong tab_follow (tránh log nhầm video)
@@ -433,6 +457,105 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.7 - MediaStore Broadcast Retry - Intelligent gallery file detection
+**File thay đổi:**
+- `utils/post.py`
+- `tabs/tab_post.py`
+- `tabs/tab_follow.py`
+- `version.txt`
+
+**Nội dung:**
+- **✨ Feature mới:** Retry mechanism cho MediaStore broadcast khi file chưa xuất hiện trong Instagram gallery
+- **Vấn đề gốc:**
+  - `send_file_api()` đã broadcast MediaStore sau khi push file
+  - Tuy nhiên, đôi khi file vẫn chưa xuất hiện trong Instagram gallery picker
+  - Automation tiếp tục click Next → Fail vì không có file để select
+
+- **Giải pháp:**
+  1. **Thêm helper method `_retry_mediastore_broadcast()`** trong `InstagramPost` class:
+     - Retry broadcast tối đa 3 lần
+     - Mỗi lần broadcast: `am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/DCIM/{filename}`
+     - Đợi 2 giây sau mỗi broadcast để MediaStore update
+     - Log chi tiết từng lần retry
+
+  2. **Update `auto_post()` method:**
+     - Thêm parameter `video_filename` để biết filename cần broadcast
+     - Import `subprocess` để chạy broadcast command
+
+  3. **Sửa logic kiểm tra file trong gallery (dòng 237-258 post.py):**
+     - **TRƯỚC:** Kiểm tra `XPATH_FIRST_BOX` → Nếu CÓ thì comment "gọi lại mediastore" (không làm gì) → Tiếp tục
+     - **SAU:**
+       - Kiểm tra `XPATH_FIRST_BOX` (file đầu tiên trong gallery)
+       - Nếu **KHÔNG CÓ** → Retry broadcast 3 lần → Kiểm tra lại
+       - Nếu vẫn **KHÔNG CÓ** → Screenshot + return False (fail fast)
+       - Nếu **CÓ** → Log "✅ File đã có trong gallery" → Tiếp tục
+
+  4. **Update callers:**
+     - `tab_post.py`: Extract `video_filename = os.path.basename(post.video_path)` → Truyền vào `auto_post()`
+     - `tab_follow.py`: Extract `video_filename = os.path.basename(video_path)` → Truyền vào `auto_post()`
+
+**Behavior change:**
+- **Logic CŨ (Optimistic):** Không kiểm tra file có trong gallery không → Cứ tiếp tục click Next → Fail sau
+- **Logic MỚI (Defensive):** Enforce file phải có → Retry broadcast 3 lần → Fail fast nếu không có → Screenshot evidence
+
+**Lý do:**
+- **Tăng độ tin cậy:** Đảm bảo file CÓ trong gallery trước khi tiếp tục
+- **Fail fast:** Biết ngay file không có, không lãng phí thời gian
+- **Debug dễ hơn:** Screenshot + log chi tiết khi fail
+- **Có cơ hội retry:** Broadcast 3 lần trước khi fail (tổng cộng 4 lần broadcast: 1 lần từ send_file + 3 lần retry)
+
+**Impact:**
+- ✅ Tăng độ tin cậy posting: File phải có trước khi post
+- ✅ Giảm fail rate do file chưa xuất hiện trong gallery
+- ✅ Fail fast với screenshot evidence
+- ✅ Log chi tiết: Biết file xuất hiện sau lần retry thứ mấy
+- ✅ Backward compatible: `video_filename` là optional parameter
+
+**Code changes:**
+- `utils/post.py`:
+  - Line 7: Add `import subprocess`
+  - Line 43-82: Add `_retry_mediastore_broadcast()` method
+  - Line 64: Add `video_filename` parameter to `auto_post()`
+  - Line 237-258: Implement file check + retry logic
+- `tabs/tab_post.py`:
+  - Line 666: Extract video_filename
+  - Line 671: Pass video_filename to auto_post()
+- `tabs/tab_follow.py`:
+  - Line 707: Extract video_filename
+  - Line 714: Pass video_filename to auto_post()
+
+---
+
+### [2025-11-13] - v1.5.6 - Fix device offline error by checking ADB state properly
+**File thay đổi:**
+- `utils/vm_manager.py`
+- `core/app.py`
+- `version.txt`
+
+**Nội dung:**
+- **🐛 Bug Fix:** Device xuất hiện trong `adb devices` nhưng state là "offline" hoặc "unauthorized" → File operations fail
+- **Vấn đề:**
+  - `wait_adb_ready()` chỉ check device có trong output hay không
+  - Không parse state column (device/offline/unauthorized)
+  - Race condition: Device vừa boot xong, trong list nhưng state="offline"
+
+- **Fix:**
+  - Parse `adb devices` output để lấy state column
+  - Chỉ return True khi state = "device"
+  - Log device state changes realtime
+  - Prevent race condition khi device chưa ready
+
+**Lý do:**
+- Device "offline" không thể thực hiện file operations
+- Cần đợi device chuyển sang state "device" mới tiếp tục
+
+**Impact:**
+- ✅ Fix device offline errors
+- ✅ Prevent race conditions
+- ✅ Clear logging của device state
 
 ---
 

@@ -662,10 +662,13 @@ class PostScheduler(threading.Thread):
 
             # Post to Instagram
             post.log(f"📲 Đang đăng video: {post.title}")
+            # Extract video filename for MediaStore broadcast retry
+            video_filename = os.path.basename(post.video_path) if post.video_path else None
             # ✅ FIX BUG #5: Dùng auto_poster local thay vì shared
             success = auto_poster.auto_post(
                 post.vm_name, adb_address, post.title,
-                use_launchex=True, ldconsole_exe=LDCONSOLE_EXE
+                use_launchex=True, ldconsole_exe=LDCONSOLE_EXE,
+                video_filename=video_filename
             )
 
             if not success:

@@ -703,11 +703,15 @@ class Stream:
 
                             auto_poster = InstagramPost(log_callback=video_log_callback)
 
+                            # Extract video filename for MediaStore broadcast retry
+                            video_filename = os.path.basename(video_path) if video_path else None
+
                             # Call auto_post with use_launchex=True
                             def post_with_launchex():
                                 return auto_poster.auto_post(
                                     vm_name, adb_address, title,
-                                    use_launchex=True, ldconsole_exe=LDCONSOLE_EXE
+                                    use_launchex=True, ldconsole_exe=LDCONSOLE_EXE,
+                                    video_filename=video_filename
                                 )
 
                             success, success_post, reason = self.worker_helper.run_blocking_func(

@@ -69,6 +69,11 @@ RESOURCE_ID_CANCEL_BUTTON = "com.instagram.android:id/appirater_cancel_button"
 RESOURCE_ID_PENDING_MEDIA = "com.instagram.android:id/row_pending_media_reshare_button"
 RETRY_ID_MEDIA = "com.instagram.android:id/row_pending_media_retry_button"
 RESOURCE_ID_CREATE_POST = "com.instagram.android:id/creation_tab"
+RESOURCE_ID_POST = "com.instagram.android:id/cam_dest_feed"
+RESOURCE_SHARE_TO = "com.instagram.android:id/clips_nux_sheet_share_button"
+RESOURCE_FIRST_BOX = "com.instagram.android:id/gallery_grid_item_thumbnail"
+RESOURCE_progress_bar = "com.instagram.android:id/row_pending_container"
+
 # XPath for resource IDs (formatted)
 XPATH_FEED_TAB = f'//*[@resource-id="{RESOURCE_ID_FEED_TAB}"]'
 XPATH_CREATE_POST = f'//*[@resource-id="{RESOURCE_ID_CREATE_POST}"]'
@@ -89,7 +94,10 @@ XPATH_PENDING_MEDIA = f'//*[@resource-id="{RESOURCE_ID_PENDING_MEDIA}"]'
 XPATH_LEFT_ACTION = f'//*[@resource-id="{RESOURCE_ID_LEFT_ACTION}"]'
 XPATH_ACTION_LEFT_CONTAINER = f'//*[@resource-id="{RESOURCE_ID_ACTION_LEFT_CONTAINER}"]'
 XPATH_RETRY_MEDIA=f'//*[@resource-id="{RETRY_ID_MEDIA}"]'
-
+XPATH_POST = f'//*[@resource-id="{RESOURCE_ID_POST}"]'
+XPATH_SHARE_TO = f'//*[@resource-id="{RESOURCE_SHARE_TO}"]'
+XPATH_FIRST_BOX = f'//*[@resource-id="{RESOURCE_FIRST_BOX}"]'
+XPATH_progress_bar = f'//*[@resource-id="{RESOURCE_progress_bar}"]'
 # Content descriptions
 CONTENT_DESC_CREATE_NEW = '//*[@content-desc="Create New"]'
 CONTENT_DESC_CREATE_POST = '//*[@content-desc="Create new post"]'
