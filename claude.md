@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.9
+> **Phiên bản hiện tại:** v1.5.0
 
 ---
 
@@ -404,6 +404,48 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.0 - Fix bulk operations to respect UI display order after sorting
+**File thay đổi:**
+- `tabs/tab_post.py`
+
+**Nội dung:**
+- **🐛 Critical Bug Fix:** Bulk schedule và bulk assign VM không respect thứ tự hiển thị trên UI
+- **User scenario:**
+  - Import 6 videos (thứ tự: 1, 2, 3, 4, 5, 6)
+  - Đặt máy ảo A cho 3 videos đầu → (1-A, 2-A, 3-A, 4, 5, 6)
+  - Sort theo máy ảo → UI hiển thị: (4, 5, 6, 1-A, 2-A, 3-A)
+  - Bulk schedule video 2-3 (mong muốn set cho videos 5, 6)
+  - **Bug:** Videos 2, 3 trong thứ tự gốc bị set thay vì 5, 6 trên UI!
+
+- **Nguyên nhân:**
+  - `bulk_schedule()` và `bulk_assign_vm()` dùng `self.posts` (thứ tự gốc)
+  - Không biết được thứ tự hiển thị trên UI sau khi sort
+
+- **Fix:**
+  - Thêm `self.displayed_posts = []` để track thứ tự hiển thị
+  - Update `load_posts_to_table()`: Lưu `sorted_posts` vào `self.displayed_posts`
+  - Update `bulk_schedule()`: Dùng `self.displayed_posts` thay vì `self.posts`
+  - Update `bulk_assign_vm()`: Dùng `self.displayed_posts` thay vì `self.posts`
+
+**Lý do:**
+- Bulk operations phải hoạt động theo thứ tự user nhìn thấy trên UI
+- Khi user sort theo VM/time/status, thứ tự thay đổi → bulk operations phải follow
+- User expect: "Video 2-3" = hàng 2-3 trên UI, không phải thứ tự import gốc
+
+**Impact:**
+- ✅ Bulk schedule hoạt động đúng với UI display order
+- ✅ Bulk assign VM hoạt động đúng với UI display order
+- ✅ Intuitive UX: Số STT trên UI = chỉ số bulk operations
+- ✅ Fix user confusion khi bulk operations set sai videos
+
+**Code changes:**
+- Line 795: Thêm `self.displayed_posts = []`
+- Line 2462: Lưu `self.displayed_posts = sorted_posts` trong `load_posts_to_table()`
+- Line 1697: `enumerate(self.displayed_posts, start=1)` trong `bulk_schedule()`
+- Line 1949: `enumerate(self.displayed_posts, start=1)` trong `bulk_assign_vm()`
 
 ---
 

@@ -792,6 +792,7 @@ class PostTab(ctk.CTkFrame):
         self.is_shutting_down = False  # Flag để track shutdown state
         self.is_running_all = False  # Flag để track trạng thái "Chạy tất cả"
         self.control_buttons = []  # List các buttons cần disable khi đang chạy
+        self.displayed_posts = []  # Thứ tự posts đang hiển thị trên UI (sau khi sort)
 
         # ✅ FIX BUG #1: Reset state khi load app
         # Khi app restart, force pause tất cả posts để tránh tự động chạy
@@ -1692,7 +1693,8 @@ class PostTab(ctk.CTkFrame):
             # Đếm số video được áp dụng
             applied_count = 0
 
-            for idx, post in enumerate(self.posts, start=1):
+            # ✅ Sử dụng thứ tự hiển thị trên UI thay vì thứ tự gốc
+            for idx, post in enumerate(self.displayed_posts, start=1):
                 # Chỉ áp dụng cho video trong phạm vi
                 if idx < start_idx or idx > end_idx:
                     continue
@@ -1943,7 +1945,8 @@ class PostTab(ctk.CTkFrame):
             vm_index = 0
             applied_count = 0
 
-            for idx, post in enumerate(self.posts, start=1):
+            # ✅ Sử dụng thứ tự hiển thị trên UI thay vì thứ tự gốc
+            for idx, post in enumerate(self.displayed_posts, start=1):
                 # Chỉ áp dụng cho video trong phạm vi
                 if idx < start_idx or idx > end_idx:
                     continue
@@ -2456,6 +2459,9 @@ class PostTab(ctk.CTkFrame):
         else:
             # ✅ KHÔNG SORT: Giữ nguyên thứ tự hiện tại
             sorted_posts = self.posts
+
+        # ✅ Lưu thứ tự hiển thị để bulk operations sử dụng
+        self.displayed_posts = sorted_posts
 
         # Add to table
         for idx, post in enumerate(sorted_posts, start=1):
