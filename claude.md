@@ -407,6 +407,29 @@ with Timer("Operation name"):
 
 ---
 
+### [2025-11-13] - v1.4.6 Hotfix - Fix import error XPATH_container_left
+**File thay đổi:**
+- `utils/post.py`
+
+**Nội dung:**
+- **🐛 Import Error Fix:** `XPATH_container_left` không tồn tại trong `constants.py`
+- **Fix:** Sửa typo từ `XPATH_container_left` → `XPATH_ACTION_LEFT_CONTAINER`
+- Lỗi xảy ra ở 2 vị trí:
+  - Dòng 18: Import statement
+  - Dòng 111-112: Usage trong create post flow
+- App không thể start được do `ImportError: cannot import name 'XPATH_container_left'`
+
+**Lý do:**
+- Constant đúng là `XPATH_ACTION_LEFT_CONTAINER` (đã có trong constants.py)
+- Lỗi typo khi thêm fallback logic cho create post button
+
+**Impact:**
+- ✅ App start thành công
+- ✅ Không còn ImportError
+- ✅ Fallback logic vẫn hoạt động đúng với constant đúng tên
+
+---
+
 ### [2025-11-13] - v1.4.6 - Fix undefined variable 'path' trong tab_users.py
 **File thay đổi:**
 - `tabs/tab_users.py`
