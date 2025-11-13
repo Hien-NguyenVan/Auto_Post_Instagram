@@ -1,19 +1,27 @@
 import os
 import subprocess
 import json
+from config import ADB_EXE
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
 
 
-def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe", log_callback=None):
+def send_file_api(local_path, vm_name, adb_path=None, log_callback=None):
     """
     Gửi file từ PC sang LDPlayer dựa vào file /data/<vm_name>.json
-    - vm_name: tên máy ảo (vd: mayaotest1)
-    - local_path: đường dẫn file trên PC
-    - log_callback: hàm callback để ghi log (vd: self.log hoặc lambda msg: ui_queue.put(...))
+
+    Args:
+        local_path: Đường dẫn file trên PC
+        vm_name: Tên máy ảo (vd: mayaotest1)
+        adb_path: Path to adb.exe (defaults to ADB_EXE from config)
+        log_callback: Hàm callback để ghi log
     """
-    # ✅ fallback cho log
+    # ✅ Fallback cho log
     log = log_callback or (lambda msg: print(msg))
+
+    # ✅ Dùng ADB_EXE từ config nếu không truyền vào
+    if adb_path is None:
+        adb_path = ADB_EXE
    
     try:
         # 🔹 1️⃣ Kiểm tra file tồn tại

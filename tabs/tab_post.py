@@ -602,6 +602,7 @@ class PostScheduler(threading.Thread):
                 success_push = send_file_api(
                     post.video_path,
                     post.vm_name,
+                    adb_path=ADB_EXE,  # Dùng ADB_EXE từ config, không hardcode
                     log_callback=lambda msg: post.log(msg)
                 )
             except Exception as e:

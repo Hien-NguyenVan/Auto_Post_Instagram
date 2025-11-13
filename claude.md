@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.4
+> **Phiên bản hiện tại:** v1.5.5
 
 ---
 
@@ -433,6 +433,71 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.5 - Remove all hardcoded ADB paths, use config auto-detection
+**File thay đổi:**
+- `utils/send_file.py`
+- `utils/delete_file.py`
+- `tabs/tab_post.py`
+
+**Nội dung:**
+- **🐛 Critical Bug Fix:** Hardcoded `adb_path = r"C:\LDPlayer\LDPlayer9\adb.exe"` fails cho users cài LDPlayer ở D:\ hoặc E:\
+- **Vấn đề:**
+  ```python
+  # utils/send_file.py - HARDCODED!
+  def send_file_api(local_path, vm_name, adb_path=r"C:\LDPlayer\LDPlayer9\adb.exe", ...):
+
+  # utils/delete_file.py - HARDCODED!
+  adb_path = r"C:\LDPlayer\LDPlayer9\adb.exe"
+  ```
+  → User cài LDPlayer ở `D:\LDPlayer\` → **`[WinError 2] The system cannot find the file specified`**
+
+- **Tại sao lại lỗi:**
+  - `config.py` đã có logic **auto-detect** LDPlayer path
+  - Tất cả chỗ khác dùng `ADB_EXE` từ config ✅
+  - Nhưng 2 utils này vẫn hardcode `C:\` ❌
+  - Khi gọi mà không truyền `adb_path` → Dùng hardcoded default → Fail
+
+- **Log error thực tế:**
+  ```
+  [15:44:38] 📤 Gửi file vào máy ảo...
+  [15:44:38]    🔍 Kiểm tra ADB connection...
+  [15:44:38] ❌ Lỗi khi gửi file sang máy ảo: [WinError 2] The system cannot find the file specified
+  ```
+
+- **Fix:**
+  1. **`utils/send_file.py`:**
+     - Import `ADB_EXE` từ config
+     - Đổi default parameter: `adb_path=None`
+     - Fallback: `if adb_path is None: adb_path = ADB_EXE`
+
+  2. **`utils/delete_file.py`:**
+     - Import `ADB_EXE` từ config
+     - Thêm `adb_path=None` parameter cho `clear_dcim()` và `clear_pictures()`
+     - Fallback: `if adb_path is None: adb_path = ADB_EXE`
+
+  3. **`tabs/tab_post.py`:**
+     - Truyền `adb_path=ADB_EXE` khi gọi `send_file_api()`
+     - Đảm bảo dùng config path, không dùng default
+
+**Lý do:**
+- **Flexibility:** Users cài LDPlayer ở C:\, D:\, E:\ đều hoạt động
+- **Consistency:** Tất cả code đều dùng `ADB_EXE` từ config
+- **Auto-detection:** `config.py` tự tìm LDPlayer path
+- **No hardcode:** Không còn hardcode path nào trong utils
+
+**Impact:**
+- ✅ Fix `[WinError 2]` cho users cài LDPlayer không phải ở C:\
+- ✅ Tất cả utils dùng `ADB_EXE` từ config
+- ✅ Backward compatible: Không break existing code
+- ✅ Linh hoạt: Có thể override `adb_path` nếu cần
+
+**Code changes:**
+- utils/send_file.py: Import ADB_EXE, đổi default parameter, add fallback
+- utils/delete_file.py: Import ADB_EXE, add adb_path parameter, add fallback
+- tabs/tab_post.py: Truyền `adb_path=ADB_EXE` vào send_file_api()
 
 ---
 
