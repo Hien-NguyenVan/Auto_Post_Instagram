@@ -518,19 +518,8 @@ class PostScheduler(threading.Thread):
                     # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
                     post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
 
-                    # Reset ADB server
-                    try:
-                        subprocess.run([ADB_EXE, "kill-server"],
-                                       creationflags=subprocess.CREATE_NO_WINDOW,
-                                       timeout=5)
-                        time.sleep(2)
-                        subprocess.run([ADB_EXE, "start-server"],
-                                       creationflags=subprocess.CREATE_NO_WINDOW,
-                                       timeout=5)
-                        time.sleep(2)
-                        post.log("🔧 Đã reset ADB server")
-                    except Exception as e:
-                        post.log(f"⚠️ Không reset được ADB: {e}")
+                    # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                    # LDPlayer sẽ tự động setup lại ADB connection khi reboot
 
                     subprocess.run(
                         [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
@@ -540,19 +529,8 @@ class PostScheduler(threading.Thread):
                     # VM chưa chạy → Bật mới
                     post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
 
-                    # Reset ADB server
-                    try:
-                        subprocess.run([ADB_EXE, "kill-server"],
-                                       creationflags=subprocess.CREATE_NO_WINDOW,
-                                       timeout=5)
-                        time.sleep(2)
-                        subprocess.run([ADB_EXE, "start-server"],
-                                       creationflags=subprocess.CREATE_NO_WINDOW,
-                                       timeout=5)
-                        time.sleep(2)
-                        post.log("🔧 Đã reset ADB server")
-                    except Exception as e:
-                        post.log(f"⚠️ Không reset được ADB: {e}")
+                    # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                    # LDPlayer sẽ tự động setup lại ADB connection khi launch
 
                     subprocess.run(
                         [LDCONSOLE_EXE, "launch", "--name", post.vm_name],

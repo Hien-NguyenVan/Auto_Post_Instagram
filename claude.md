@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.4.6
+> **Phiên bản hiện tại:** v1.4.7
 
 ---
 
@@ -404,6 +404,32 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.4.7 - Fix ADB connection lost khi đăng nhiều videos song song
+**File thay đổi:**
+- `tabs/tab_post.py`
+- `tabs/tab_follow.py`
+
+**Nội dung:**
+- **🐛 Critical Bug Fix:** VM 1 mất kết nối khi VM 2 bắt đầu đăng video
+- **Nguyên nhân:** Code đang dùng `adb kill-server` + `adb start-server` trước khi reboot/launch VM
+- **Vấn đề:** `kill-server` kill **TOÀN BỘ** ADB server → Tất cả VMs khác mất kết nối!
+- **Fix:** Xóa bỏ hoàn toàn 4 chỗ reset ADB server:
+  - `tab_post.py`: Dòng 521-533 (trước reboot) và dòng 543-555 (trước launch)
+  - `tab_follow.py`: Dòng 499-511 (trước reboot) và dòng 511-523 (trước launch)
+
+**Lý do:**
+- LDPlayer tự động setup lại ADB connection khi reboot/launch VM
+- Reset ADB server toàn cục không cần thiết và gây hại
+- Ảnh hưởng đến các VMs khác đang hoạt động song song
+
+**Impact:**
+- ✅ VMs khác không còn bị mất kết nối
+- ✅ Có thể đăng nhiều videos song song trên nhiều VMs
+- ✅ Giảm thời gian chờ (bỏ 2s + 2s = 4s mỗi lần launch/reboot)
+- ✅ Code đơn giản hơn, ít lỗi hơn
 
 ---
 

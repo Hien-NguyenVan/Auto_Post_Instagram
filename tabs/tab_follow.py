@@ -496,19 +496,8 @@ class Stream:
                                 # VM đang chạy → Reboot để đảm bảo trạng thái sạch
                                 self.log(f"⚠️ Máy ảo '{vm_name}' đang chạy — Reboot để đảm bảo trạng thái sạch")
 
-                                # Reset ADB server
-                                try:
-                                    subprocess.run([ADB_EXE, "kill-server"],
-                                                   creationflags=subprocess.CREATE_NO_WINDOW,
-                                                   timeout=5)
-                                    time.sleep(2)
-                                    subprocess.run([ADB_EXE, "start-server"],
-                                                   creationflags=subprocess.CREATE_NO_WINDOW,
-                                                   timeout=5)
-                                    time.sleep(2)
-                                    self.log("🔧 Đã reset ADB server")
-                                except Exception as e:
-                                    self.log(f"⚠️ Không reset được ADB: {e}")
+                                # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                                # LDPlayer sẽ tự động setup lại ADB connection khi reboot
 
                                 subprocess.run([LDCONSOLE_EXE, "reboot", "--name", vm_name],
                                             creationflags=subprocess.CREATE_NO_WINDOW)
@@ -519,19 +508,8 @@ class Stream:
 
                                 self.log(f"🚀 Bật máy ảo '{vm_name}' để đăng video: {title}")
 
-                                # Reset ADB server
-                                try:
-                                    subprocess.run([ADB_EXE, "kill-server"],
-                                                   creationflags=subprocess.CREATE_NO_WINDOW,
-                                                   timeout=5)
-                                    time.sleep(2)
-                                    subprocess.run([ADB_EXE, "start-server"],
-                                                   creationflags=subprocess.CREATE_NO_WINDOW,
-                                                   timeout=5)
-                                    time.sleep(2)
-                                    self.log("🔧 Đã reset ADB server")
-                                except Exception as e:
-                                    self.log(f"⚠️ Không reset được ADB: {e}")
+                                # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                                # LDPlayer sẽ tự động setup lại ADB connection khi launch
 
                                 subprocess.run([LDCONSOLE_EXE, "launch", "--name", vm_name],
                                             creationflags=subprocess.CREATE_NO_WINDOW)
