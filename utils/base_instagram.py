@@ -68,7 +68,8 @@ class BaseInstagramAutomation:
         timeout: int = TIMEOUT_DEFAULT,
         vm_name: str = "",
         sleep_after: Optional[float] = None,
-        optional: bool = False
+        optional: bool = False,
+        description: str = ""
     ) -> bool:
         """
         Click an element safely with timeout and error handling.
@@ -80,16 +81,20 @@ class BaseInstagramAutomation:
             vm_name: VM name for logging
             sleep_after: Time to wait after clicking (optional)
             optional: If True, don't treat missing element as error
+            description: Human-readable description of what we're clicking
 
         Returns:
             bool: True if click succeeded, False otherwise
         """
+        desc = description or f"element {xpath[:50]}..."
+        self.log(vm_name, f"🖱️ Đang click {desc}...")
+
         try:
             el = d.xpath(xpath)
 
             if el.wait(timeout=timeout):
                 el.click()
-                self.log(vm_name, f"✅ Click thành công: {xpath[:50]}...")
+                self.log(vm_name, f"✅ Click {desc} thành công")
 
                 if sleep_after:
                     self.log(vm_name, f"⏱️ Chờ {sleep_after}s sau khi click...")
@@ -99,19 +104,19 @@ class BaseInstagramAutomation:
             else:
                 if optional:
                     # Optional element not found - not an error
-                    self.log(vm_name, f"⚠️ Không thấy (optional) {xpath[:50]}... → bỏ qua", "WARNING")
+                    self.log(vm_name, f"⚠️ Không thấy (optional) {desc} → bỏ qua", "WARNING")
                     return True
 
                 # Required element not found - error
                 self.log(
                     vm_name,
-                    f"❌ Hết thời gian {timeout}s mà không tìm thấy: {xpath[:50]}...",
+                    f"❌ Không tìm thấy {desc} trong {timeout}s",
                     "ERROR"
                 )
                 return False
 
         except Exception as e:
-            self.log(vm_name, f"⚠️ Lỗi khi click {xpath[:50]}...: {e}", "ERROR")
+            self.log(vm_name, f"⚠️ Lỗi khi click {desc}: {e}", "ERROR")
             self.logger.exception(f"Exception in safe_click for {xpath}")
             return False
 
@@ -122,7 +127,8 @@ class BaseInstagramAutomation:
         text: str,
         timeout: int = TIMEOUT_DEFAULT,
         sleep_after: float = WAIT_SHORT,
-        vm_name: str = ""
+        vm_name: str = "",
+        description: str = ""
     ) -> bool:
         """
         Send text to an input field safely with timeout and error handling.
@@ -134,26 +140,30 @@ class BaseInstagramAutomation:
             timeout: Maximum wait time in seconds
             sleep_after: Time to wait after sending text
             vm_name: VM name for logging
+            description: Human-readable description of what field we're filling
 
         Returns:
             bool: True if text was sent successfully
         """
+        desc = description or f"input field {xpath[:50]}..."
+        self.log(vm_name, f"⌨️ Đang nhập vào {desc}...")
+
         try:
             if d.xpath(xpath).wait(timeout=timeout):
                 d.xpath(xpath).set_text(text)
-                self.log(vm_name, f"📝 Đã nhập text vào: {xpath[:50]}...")
+                self.log(vm_name, f"✅ Đã nhập text vào {desc}")
                 time.sleep(sleep_after)
                 return True
             else:
                 self.log(
                     vm_name,
-                    f"❌ Không tìm thấy input field: {xpath[:50]}...",
+                    f"❌ Không tìm thấy {desc} trong {timeout}s",
                     "ERROR"
                 )
                 return False
 
         except Exception as e:
-            self.log(vm_name, f"⚠️ Không tìm thấy hoặc nhập lỗi {xpath[:50]}...: {e}", "ERROR")
+            self.log(vm_name, f"⚠️ Lỗi khi nhập vào {desc}: {e}", "ERROR")
             self.logger.exception(f"Exception in safe_send_text for {xpath}")
             return False
 

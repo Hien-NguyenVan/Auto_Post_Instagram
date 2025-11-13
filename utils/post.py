@@ -146,7 +146,8 @@ class InstagramPost(BaseInstagramAutomation):
                 self.log(vm_name, "📱 Mở ứng dụng Instagram...")
                 for i in range(MAX_RETRY_OPEN_APP):
                     if d.xpath(XPATH_INSTAGRAM_APP).exists:
-                        if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=WAIT_EXTRA_LONG, vm_name=vm_name):
+                        if not self.safe_click(d, XPATH_INSTAGRAM_APP, sleep_after=WAIT_EXTRA_LONG,
+                                              vm_name=vm_name, description="Instagram app icon"):
                             self.log(vm_name, "❌ Tìm thấy nhưng không click được app Instagram", "ERROR")
                             return False
                         break
@@ -168,30 +169,36 @@ class InstagramPost(BaseInstagramAutomation):
             # Click allow button if exists
             self.log(vm_name, "Nhấn Allow (nếu có)")
             self.safe_click(d, XPATH_PROMO_BUTTON, sleep_after=WAIT_LONG,
-                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT,
+                          description="Allow button")
 
             # kiểm tra có create tab hay khong
             if self.wait_for_element(d, XPATH_CREATE_POST,vm_name=vm_name,description="create post", timeout=WAIT_LONG ):
                 self.safe_click(d, XPATH_CREATE_POST, sleep_after=WAIT_LONG,
-                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT,
+                          description="Create post button")
             elif self.wait_for_element(d, XPATH_ACTION_LEFT_CONTAINER,vm_name=vm_name,description="create post", timeout=WAIT_MEDIUM ):
                 self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG,
-                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT,
+                          description="Action left button")
             else:
                 # Go to profile tab
                 self.log(vm_name, "Chuyển sang tab Profile")
-                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG, vm_name=vm_name):
+                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_LONG,
+                                      vm_name=vm_name, description="Profile tab"):
                     self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
                     self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy Profile tab - UI có thể đã thay đổi")
                     return False
 
                 self.log(vm_name, "Chuyển sang tab feed tab")
-                if not self.safe_click(d, XPATH_FEED_TAB, sleep_after=WAIT_SHORT, vm_name=vm_name):
-                    self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
+                if not self.safe_click(d, XPATH_FEED_TAB, sleep_after=WAIT_SHORT,
+                                      vm_name=vm_name, description="Feed tab"):
+                    self.log(vm_name, "⚠️ Không tìm thấy nút Feed", "WARNING")
                     return False
 
                 self.log(vm_name, "Chuyển sang tab Profile")
-                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_MEDIUM, vm_name=vm_name):
+                if not self.safe_click(d, XPATH_PROFILE_TAB, sleep_after=WAIT_MEDIUM,
+                                      vm_name=vm_name, description="Profile tab"):
                     self.log(vm_name, "⚠️ Không tìm thấy nút Profile", "WARNING")
                     return False
 
@@ -203,14 +210,16 @@ class InstagramPost(BaseInstagramAutomation):
 
                     if creation_tab:
                         self.log(vm_name, "Nhấn Create tab")
-                        if not self.safe_click(d, CONTENT_DESC_CREATE_NEW, sleep_after=WAIT_LONG, vm_name=vm_name):
+                        if not self.safe_click(d, CONTENT_DESC_CREATE_NEW, sleep_after=WAIT_LONG,
+                                              vm_name=vm_name, description="Create new button"):
                             self.log(vm_name, "❌ Không click được Create tab", "ERROR")
                             return False
                         break
 
                     elif action_left:
                         self.log(vm_name, "Nhấn nút trái")
-                        if not self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG, vm_name=vm_name):
+                        if not self.safe_click(d, XPATH_ACTION_LEFT_CONTAINER, sleep_after=WAIT_LONG,
+                                              vm_name=vm_name, description="Action left container"):
                             self.log(vm_name, "❌ Không click được nút trái", "ERROR")
                             return False
                         break
@@ -223,13 +232,15 @@ class InstagramPost(BaseInstagramAutomation):
 
                 # Click "Create new post"
                 self.log(vm_name, "Nhấn Create new post")
-                if not self.safe_click(d, CONTENT_DESC_CREATE_POST, sleep_after=WAIT_LONG, vm_name=vm_name):
+                if not self.safe_click(d, CONTENT_DESC_CREATE_POST, sleep_after=WAIT_LONG,
+                                      vm_name=vm_name, description="Create post button"):
                     self.log(vm_name, "⚠️ Không tìm thấy nút Post", "WARNING")
                     self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post - Menu có thể đã thay đổi")
                     return False
 
             self.log(vm_name, "Nhấn post")
-            if not self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT, vm_name=vm_name):
+            if not self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT,
+                                  vm_name=vm_name, description="Post selector button"):
                 self.log(vm_name, "⚠️ Không tìm thấy nút post", "WARNING")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Post")
                 return False
@@ -261,14 +272,16 @@ class InstagramPost(BaseInstagramAutomation):
             time.sleep(3)
             # Click Next (top)
             self.log(vm_name, "Nhấn Next (trên)")
-            if not self.safe_click(d, XPATH_NEXT_BUTTON, sleep_after=WAIT_LONG, vm_name=vm_name):
+            if not self.safe_click(d, XPATH_NEXT_BUTTON, sleep_after=WAIT_LONG,
+                                  vm_name=vm_name, description="Next button (top)"):
                 self.log(vm_name, "⚠️ Không tìm thấy nút Next trên", "WARNING")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút next trên")
                 return False
 
             # Click Next (bottom)
             self.log(vm_name, "Nhấn Next (dưới)")
-            if not self.safe_click(d, XPATH_RIGHT_ACTION, sleep_after=WAIT_LONG, vm_name=vm_name):
+            if not self.safe_click(d, XPATH_RIGHT_ACTION, sleep_after=WAIT_LONG,
+                                  vm_name=vm_name, description="Next button (bottom)"):
                 self.log(vm_name, "⚠️ Không tìm thấy nút Next dưới", "WARNING")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút next dưới")
                 return False
@@ -276,31 +289,36 @@ class InstagramPost(BaseInstagramAutomation):
             # Click Continue if exists
             self.log(vm_name, "Nhấn Continue (nếu có)")
             self.safe_click(d, XPATH_DOWNLOAD_NUX, sleep_after=WAIT_LONG,
-                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT,
+                          description="Continue button")
 
             # Click OK if exists
             self.log(vm_name, "Nhấn OK (nếu có)")
             self.safe_click(d, XPATH_PRIMARY_ACTION, sleep_after=WAIT_LONG,
-                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT)
+                          vm_name=vm_name, optional=True, timeout=TIMEOUT_SHORT,
+                          description="OK button")
 
             # Enter caption
             self.log(vm_name, f"📝 Nhập caption: {title}")
             if not self.safe_send_text(d, XPATH_CAPTION_INPUT, title,
-                                      sleep_after=WAIT_LONG, vm_name=vm_name):
+                                      sleep_after=WAIT_LONG, vm_name=vm_name,
+                                      description="caption input"):
                 self.log(vm_name, "❌ Không thể nhập caption", "ERROR")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy caption input - UI có thể đã thay đổi")
                 return False
 
             # Click OK button
             self.log(vm_name, "🔑 Nhấn OK")
-            if not self.safe_click(d, XPATH_ACTION_BAR_TEXT, sleep_after=WAIT_LONG, vm_name=vm_name):
+            if not self.safe_click(d, XPATH_ACTION_BAR_TEXT, sleep_after=WAIT_LONG,
+                                  vm_name=vm_name, description="OK button"):
                 self.log(vm_name, "❌ Không tìm thấy nút OK", "ERROR")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút OK sau nhập caption")
                 return False
 
             # Click Share
             self.log(vm_name, "🔑 Nhấn Share")
-            if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT, vm_name=vm_name, timeout=2):
+            if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT,
+                                  vm_name=vm_name, timeout=2, description="Share button"):
                 self.log(vm_name, "❌ Không tìm thấy nút Share", "ERROR")
                 self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Share - UI upload có thể đã thay đổi")
                 return False

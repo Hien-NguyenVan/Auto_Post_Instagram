@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.9
+> **Phiên bản hiện tại:** v1.5.10
 
 ---
 
@@ -329,7 +329,14 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.9 (2025-11-13) - Current Version
+### v1.5.10 (2025-11-13) - Current Version
+**✨ UX IMPROVEMENT: Add description parameter to safe_click and safe_send_text**
+- Thêm parameter `description` cho `safe_click()` và `safe_send_text()`
+- Log rõ ràng hơn: "🖱️ Đang click Next button (top)..." thay vì "🖱️ Đang click element //xpath..."
+- Cập nhật 15+ chỗ gọi trong utils/post.py với description dễ hiểu
+- Cải thiện UX khi debug: Nhìn log biết ngay đang thao tác element nào
+
+### v1.5.9
 **⚡ OPTIMIZATION: Download on-demand - Tối ưu disk usage**
 - Thay đổi flow: Download → Wait → Acquire VM → Post
 - Sang: Wait → Acquire VM → Download → Post
