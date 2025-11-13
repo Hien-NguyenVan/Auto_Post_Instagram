@@ -1750,8 +1750,10 @@ class PostTab(ctk.CTkFrame):
         dialog.wait_window()
 
         if result["ok"]:
+            # ✅ Cập nhật self.posts theo thứ tự hiển thị để giữ nguyên sort
+            self.posts = self.displayed_posts
             save_scheduled_posts(self.posts)
-            self.load_posts_to_table()
+            self.load_posts_to_table(auto_sort=False)  # Giữ nguyên thứ tự đã sort
 
             applied_count = result.get("applied_count", 0)
             start_idx = result.get("start_idx", 1)
@@ -2001,8 +2003,10 @@ class PostTab(ctk.CTkFrame):
         dialog.wait_window()
 
         if result["ok"]:
+            # ✅ Cập nhật self.posts theo thứ tự hiển thị để giữ nguyên sort
+            self.posts = self.displayed_posts
             save_scheduled_posts(self.posts)
-            self.load_posts_to_table()
+            self.load_posts_to_table(auto_sort=False)  # Giữ nguyên thứ tự đã sort
 
             applied_count = result.get("applied_count", 0)
             start_idx = result.get("start_idx", 1)

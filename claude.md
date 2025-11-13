@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.0
+> **Phiên bản hiện tại:** v1.5.1
 
 ---
 
@@ -404,6 +404,47 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.1 - Fix table order preservation after bulk operations
+**File thay đổi:**
+- `tabs/tab_post.py`
+
+**Nội dung:**
+- **🐛 Bug Fix:** Sau khi bulk schedule/assign VM, table nhảy về thứ tự ban đầu thay vì giữ nguyên thứ tự đã sort
+- **User scenario:**
+  - Import 6 videos: 1, 2, 3, 4, 5, 6
+  - Set VM A cho 1-3: 1-A, 2-A, 3-A, 4, 5, 6
+  - Sort theo VM → UI: 4, 5, 6, 1-A, 2-A, 3-A
+  - Bulk assign VM B cho video 2-3 (tức 5, 6)
+  - **Bug trước:** Gán đúng (5-B, 6-B) nhưng table nhảy về: 1-A, 2-A, 3-A, 4, 5-B, 6-B
+  - **Mong muốn:** Giữ nguyên thứ tự sort: 4, 5-B, 6-B, 1-A, 2-A, 3-A
+
+- **Nguyên nhân:**
+  - Sau bulk operations, code gọi `self.load_posts_to_table()` (không tham số)
+  - `auto_sort=False` (mặc định) → Load từ `self.posts` (thứ tự gốc)
+  - Không giữ được thứ tự đã sort
+
+- **Fix:**
+  - Sau bulk operations: `self.posts = self.displayed_posts` (cập nhật thứ tự gốc)
+  - Sau đó: `self.load_posts_to_table(auto_sort=False)` (giữ nguyên thứ tự)
+  - Áp dụng cho cả `bulk_schedule()` và `bulk_assign_vm()`
+
+**Lý do:**
+- User đã chọn sort theo tiêu chí nào đó (VM/time/status/name)
+- Sau khi bulk operations, phải giữ nguyên thứ tự đó
+- Tránh confusion khi table tự động nhảy về thứ tự ban đầu
+
+**Impact:**
+- ✅ Giữ nguyên thứ tự sort sau bulk schedule
+- ✅ Giữ nguyên thứ tự sort sau bulk assign VM
+- ✅ Thứ tự gốc (`self.posts`) được cập nhật theo UI
+- ✅ UX tốt hơn: Table không nhảy lung tung
+
+**Code changes:**
+- Line 1754-1756: Update `self.posts` và reload với `auto_sort=False` trong `bulk_schedule()`
+- Line 2007-2009: Update `self.posts` và reload với `auto_sort=False` trong `bulk_assign_vm()`
 
 ---
 
