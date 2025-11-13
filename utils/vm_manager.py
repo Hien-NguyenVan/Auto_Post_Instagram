@@ -131,7 +131,7 @@ class VMManager:
 
     @staticmethod
     def wait_vm_ready(vm_name: str, ldconsole_path: str, timeout: int = 60,
-                      check_interval: int = 2) -> bool:
+                      check_interval: int = 2, log_callback=None) -> bool:
         """
         Chờ máy ảo khởi động hoàn toàn (status = "1" trong ldconsole list2).
 
@@ -140,12 +140,15 @@ class VMManager:
             ldconsole_path: Đường dẫn đến ldconsole.exe
             timeout: Thời gian chờ tối đa (giây)
             check_interval: Thời gian chờ giữa các lần check (giây)
+            log_callback: Optional callback function(msg) để log ra UI
 
         Returns:
             bool: True nếu VM đã ready, False nếu timeout
         """
         logger = logging.getLogger(__name__)
         elapsed = 0
+        last_status = None
+        last_progress_log = 0
 
         logger.info(f"⏳ Chờ máy ảo '{vm_name}' khởi động (timeout={timeout}s)...")
 
@@ -164,29 +167,53 @@ class VMManager:
                     parts = line.split(",")
                     # Format: index,name,title,top_window,running,pid
                     if len(parts) >= 5 and parts[1].strip() == vm_name:
-                        is_running = parts[4].strip() == "1"
+                        status = parts[4].strip()
 
-                        if is_running:
+                        # Log khi status thay đổi
+                        if status != last_status:
+                            status_name = {"0": "Tắt", "1": "Đang chạy", "2": "Đang khởi động"}.get(status, status)
+                            if log_callback:
+                                log_callback(f"   📊 VM status: {status_name} (sau {elapsed}s)")
+                            logger.info(f"VM '{vm_name}' status changed: {status} ({status_name})")
+                            last_status = status
+
+                        if status == "1":
+                            if log_callback:
+                                log_callback(f"✅ Máy ảo đã sẵn sàng (sau {elapsed}s)")
                             logger.info(f"✅ Máy ảo '{vm_name}' đã sẵn sàng sau {elapsed}s")
                             return True
-                        else:
-                            logger.debug(f"VM '{vm_name}' status: {parts[4]} (chưa ready)")
                         break
 
             except subprocess.TimeoutExpired:
+                msg = f"⚠️ ldconsole list2 timeout (vẫn đang chờ...)"
+                if log_callback:
+                    log_callback(msg)
                 logger.warning(f"ldconsole list2 timeout khi check VM '{vm_name}'")
             except Exception as e:
+                msg = f"⚠️ Lỗi check VM: {e}"
+                if log_callback:
+                    log_callback(msg)
                 logger.error(f"Lỗi khi check status VM '{vm_name}': {e}")
+
+            # Log progress mỗi 15s để user biết vẫn đang chờ
+            if elapsed > 0 and elapsed - last_progress_log >= 15:
+                if log_callback:
+                    status_str = f"status={last_status}" if last_status else "checking..."
+                    log_callback(f"   ⏳ Vẫn đang chờ... ({elapsed}s/{timeout}s, {status_str})")
+                last_progress_log = elapsed
 
             time.sleep(check_interval)
             elapsed += check_interval
 
-        logger.error(f"⏱️ Timeout {timeout}s - Máy ảo '{vm_name}' chưa sẵn sàng")
+        msg = f"❌ Timeout {timeout}s - VM không ready (status cuối: {last_status})"
+        if log_callback:
+            log_callback(msg)
+        logger.error(f"⏱️ Timeout {timeout}s - Máy ảo '{vm_name}' chưa sẵn sàng (status: {last_status})")
         return False
 
     @staticmethod
     def wait_adb_ready(device: str, adb_path: str, timeout: int = 30,
-                       check_interval: int = 2) -> bool:
+                       check_interval: int = 2, log_callback=None) -> bool:
         """
         Chờ ADB kết nối đến device.
 
@@ -195,12 +222,14 @@ class VMManager:
             adb_path: Đường dẫn đến adb.exe
             timeout: Thời gian chờ tối đa (giây)
             check_interval: Thời gian chờ giữa các lần check (giây)
+            log_callback: Optional callback function(msg) để log ra UI
 
         Returns:
             bool: True nếu ADB đã connect, False nếu timeout
         """
         logger = logging.getLogger(__name__)
         elapsed = 0
+        last_progress_log = 0
 
         logger.info(f"⏳ Chờ ADB kết nối đến '{device}' (timeout={timeout}s)...")
 
@@ -218,19 +247,36 @@ class VMManager:
 
                 # Check if device is in the output
                 if device in result.stdout:
+                    if log_callback:
+                        log_callback(f"✅ ADB đã kết nối (sau {elapsed}s)")
                     logger.info(f"✅ ADB đã kết nối đến '{device}' sau {elapsed}s")
                     return True
                 else:
                     logger.debug(f"Device '{device}' chưa xuất hiện trong 'adb devices'")
 
             except subprocess.TimeoutExpired:
+                msg = f"⚠️ 'adb devices' timeout (vẫn đang chờ...)"
+                if log_callback and elapsed > 10:  # Chỉ log sau 10s
+                    log_callback(msg)
                 logger.warning(f"adb devices timeout khi check '{device}'")
             except Exception as e:
+                msg = f"⚠️ Lỗi check ADB: {e}"
+                if log_callback:
+                    log_callback(msg)
                 logger.error(f"Lỗi khi check ADB '{device}': {e}")
+
+            # Log progress mỗi 10s
+            if elapsed > 0 and elapsed - last_progress_log >= 10:
+                if log_callback:
+                    log_callback(f"   ⏳ Vẫn đang chờ ADB... ({elapsed}s/{timeout}s)")
+                last_progress_log = elapsed
 
             time.sleep(check_interval)
             elapsed += check_interval
 
+        msg = f"❌ Timeout {timeout}s - ADB không kết nối được"
+        if log_callback:
+            log_callback(msg)
         logger.error(f"⏱️ Timeout {timeout}s - ADB chưa kết nối đến '{device}'")
         return False
 

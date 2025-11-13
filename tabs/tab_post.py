@@ -548,14 +548,15 @@ class PostScheduler(threading.Thread):
 
             # Wait for VM to be fully ready
             post.log(f"⏳ Chờ máy ảo '{post.vm_name}' khởi động hoàn toàn...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120):
+            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120, log_callback=post.log):
                 post.log(f"⏱️ Timeout - Máy ảo '{post.vm_name}' không khởi động được")
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
                 return
 
             # Wait for ADB to connect
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE):
+            post.log(f"⏳ Chờ ADB kết nối...")
+            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=post.log):
                 post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
                 post.log(f"🛑 Đang tắt máy ảo...")
                 subprocess.run(

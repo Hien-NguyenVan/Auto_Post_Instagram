@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.1
+> **Phiên bản hiện tại:** v1.5.2
 
 ---
 
@@ -433,6 +433,65 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.2 - Add realtime logging for VM startup and ADB connection
+**File thay đổi:**
+- `utils/vm_manager.py`
+- `tabs/tab_post.py`
+- `tabs/tab_follow.py`
+
+**Nội dung:**
+- **🐛 Bug Fix:** Trong 120s chờ VM khởi động, không có log nào → User không biết đang làm gì
+- **User experience trước:**
+  ```
+  [14:38:05] ⏳ Chờ máy ảo 'test1' khởi động hoàn toàn...
+  [14:40:08] ⏱️ Timeout - Máy ảo 'test1' không khởi động được
+  ```
+  → 2 phút im lặng hoàn toàn!
+
+- **Nguyên nhân:**
+  - `wait_vm_ready()` và `wait_adb_ready()` chỉ log vào Python logger
+  - Không log ra UI (`post.log()`)
+  - User không biết VM status hiện tại, có lỗi gì không
+
+- **Fix:**
+  - Thêm parameter `log_callback=None` vào cả 2 functions
+  - Log VM status changes: "Tắt" / "Đang khởi động" / "Đang chạy"
+  - Log progress mỗi 15s (VM) và 10s (ADB) để user biết vẫn đang chờ
+  - Log timeout cuối cùng với status cuối cùng để debug
+  - Update tất cả caller để pass `post.log` hoặc `self.log`
+
+- **User experience sau:**
+  ```
+  [14:38:05] ⏳ Chờ máy ảo 'test1' khởi động hoàn toàn...
+  [14:38:07]    📊 VM status: Đang khởi động (sau 2s)
+  [14:38:12]    📊 VM status: Đang chạy (sau 7s)
+  [14:38:12] ✅ Máy ảo đã sẵn sàng (sau 7s)
+  [14:38:12] ⏳ Chờ ADB kết nối...
+  [14:38:14] ✅ ADB đã kết nối (sau 2s)
+  ```
+  → Rõ ràng từng bước!
+
+**Lý do:**
+- User cần biết VM đang ở trạng thái nào
+- Debug dễ hơn: Biết VM bị stuck ở status nào (0, 1, 2)
+- Tránh confusion: "App có bị đơ không?"
+- UX tốt hơn: Thấy progress realtime
+
+**Impact:**
+- ✅ Thấy VM status changes realtime
+- ✅ Biết khi nào timeout và status cuối là gì
+- ✅ Progress updates mỗi 10-15s
+- ✅ Debug dễ hơn rất nhiều
+- ✅ Không còn "2 phút im lặng"
+
+**Code changes:**
+- vm_manager.py:133-212: Update `wait_vm_ready()` với log_callback
+- vm_manager.py:215-281: Update `wait_adb_ready()` với log_callback
+- tab_post.py:551, 559: Pass `log_callback=post.log`
+- tab_follow.py:519, 540: Pass `log_callback=self.log`
 
 ---
 

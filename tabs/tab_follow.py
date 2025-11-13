@@ -516,7 +516,7 @@ class Stream:
 
                             # ========== CHỜ MÁY ẢO SẴN SÀNG (Tăng timeout lên 120s) ==========
                             self.log(f"⏳ Chờ máy ảo '{vm_name}' khởi động hoàn toàn...")
-                            if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=120):
+                            if not vm_manager.wait_vm_ready(vm_name, LDCONSOLE_EXE, timeout=120, log_callback=self.log):
                                 self.log(f"⏱️ Timeout 120s - Máy ảo '{vm_name}' không khởi động được")
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
@@ -535,8 +535,9 @@ class Stream:
                                 vm_info = json.load(f)
                             port = vm_info.get("port")
                             adb_device = f"emulator-{port}"
+                            self.log(f"⏳ Chờ ADB kết nối...")
 
-                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE):
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=self.log):
                                 self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}'")
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(
