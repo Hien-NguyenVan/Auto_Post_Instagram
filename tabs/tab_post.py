@@ -1756,7 +1756,9 @@ class PostTab(ctk.CTkFrame):
 
         if result["ok"]:
             # ✅ Cập nhật self.posts theo thứ tự hiển thị để giữ nguyên sort
-            self.posts = self.displayed_posts
+            # ⚠️ CRITICAL FIX v1.5.8: Dùng slice assignment [:] để modify in-place
+            # Giữ nguyên reference cho scheduler.posts, tránh scheduler check list cũ
+            self.posts[:] = self.displayed_posts
             save_scheduled_posts(self.posts)
             self.load_posts_to_table(auto_sort=False)  # Giữ nguyên thứ tự đã sort
 
@@ -2009,7 +2011,9 @@ class PostTab(ctk.CTkFrame):
 
         if result["ok"]:
             # ✅ Cập nhật self.posts theo thứ tự hiển thị để giữ nguyên sort
-            self.posts = self.displayed_posts
+            # ⚠️ CRITICAL FIX v1.5.8: Dùng slice assignment [:] để modify in-place
+            # Giữ nguyên reference cho scheduler.posts, tránh scheduler check list cũ
+            self.posts[:] = self.displayed_posts
             save_scheduled_posts(self.posts)
             self.load_posts_to_table(auto_sort=False)  # Giữ nguyên thứ tự đã sort
 
@@ -2158,7 +2162,9 @@ class PostTab(ctk.CTkFrame):
                     imported_posts.append(post)
 
             # Replace current posts
-            self.posts = imported_posts
+            # ⚠️ CRITICAL FIX v1.5.8: Dùng clear + extend để modify in-place
+            self.posts.clear()
+            self.posts.extend(imported_posts)
             save_scheduled_posts(self.posts)
             self.load_posts_to_table()
 
@@ -2696,7 +2702,8 @@ class PostTab(ctk.CTkFrame):
             return
 
         # Xóa các video đã chọn
-        self.posts = [post for post in self.posts if post.id not in selected_ids]
+        # ⚠️ CRITICAL FIX v1.5.8: Dùng slice assignment để modify in-place
+        self.posts[:] = [post for post in self.posts if post.id not in selected_ids]
 
         # Xóa khỏi checked_posts
         for post_id in selected_ids:

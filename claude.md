@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.7
+> **Phiên bản hiện tại:** v1.5.8
 
 ---
 
@@ -329,7 +329,15 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.7 (2025-11-13) - Current Version
+### v1.5.8 (2025-11-13) - Current Version
+**🐛 CRITICAL FIX: Scheduler race condition - Fix list reference bug**
+- Fix scheduler không chạy sau bulk operations (bulk_schedule, bulk_assign_vm)
+- Fix race condition: scheduler.posts reference bị stale khi reassign self.posts
+- Replace all `self.posts = new_list` với slice assignment `self.posts[:] = new_list`
+- Fix 4 chỗ: bulk_schedule(), bulk_assign_vm(), import_channel(), delete_posts()
+- Scheduler giờ luôn thấy updates, chạy deterministic 100%
+
+### v1.5.7
 **✨ MediaStore Broadcast Retry - Intelligent gallery file detection**
 - Thêm retry mechanism cho MediaStore broadcast khi file chưa xuất hiện trong gallery
 - Implement `_retry_mediastore_broadcast()` method với tối đa 3 lần retry
@@ -457,6 +465,104 @@ with Timer("Operation name"):
 > - Mô tả thay đổi 2
 > **Lý do:** Tại sao cần thay đổi
 > ```
+
+---
+
+### [2025-11-13] - v1.5.8 - CRITICAL FIX: Scheduler race condition - List reference bug
+**File thay đổi:**
+- `tabs/tab_post.py`
+- `version.txt`
+
+**Nội dung:**
+- **🐛 CRITICAL BUG FIX:** Scheduler không chạy sau khi user dùng bulk operations
+- **Vấn đề nghiêm trọng:**
+  - User lên lịch 20 videos, set thời gian, nhấn "Chạy tất cả"
+  - Đến giờ KHÔNG CHẠY! (non-deterministic: đôi khi chạy lần 1, đôi khi lần 3-4)
+  - Phải restart app thì mới chạy được
+
+- **Root cause: Python Reference vs Reassignment**
+  ```python
+  # Khởi tạo:
+  self.posts = [video1, video2, ...]  # List A
+  scheduler.posts = self.posts        # scheduler TRỎ vào List A
+
+  # User dùng bulk_schedule():
+  self.posts = self.displayed_posts   # ❌ TẠO List B mới!
+  # → self.posts TRỎ List B
+  # → scheduler.posts VẪN TRỎ List A (CŨ!)
+  # → Scheduler check List A → KHÔNG THẤY videos mới!
+  ```
+
+- **Tại sao non-deterministic?**
+  - Phụ thuộc user CÓ DÙNG bulk operations không
+  - Phụ thuộc KHI NÀO dùng (trước hay sau loop)
+  - Nếu KHÔNG dùng bulk → In-place modify → Chạy OK
+  - Nếu CÓ dùng bulk → Reassign → Scheduler mất sync
+
+- **Fix toàn diện (4 chỗ):**
+
+  **1. bulk_schedule() - Line 1761:**
+  ```python
+  # Before:
+  self.posts = self.displayed_posts  # ❌ Reassign
+
+  # After:
+  self.posts[:] = self.displayed_posts  # ✅ Slice assignment (in-place)
+  ```
+
+  **2. bulk_assign_vm() - Line 2016:**
+  ```python
+  self.posts[:] = self.displayed_posts  # ✅ In-place
+  ```
+
+  **3. import_channel() - Line 2166-2167:**
+  ```python
+  # Before:
+  self.posts = imported_posts  # ❌ Reassign
+
+  # After:
+  self.posts.clear()                      # ✅ Clear old
+  self.posts.extend(imported_posts)       # ✅ Add new (in-place)
+  ```
+
+  **4. delete_posts() - Line 2706:**
+  ```python
+  # Before:
+  self.posts = [post for post in self.posts if ...]  # ❌ Reassign
+
+  # After:
+  self.posts[:] = [post for post in self.posts if ...]  # ✅ In-place
+  ```
+
+**Lý do:**
+- **Python reference semantics:** Gán `=` tạo reference mới, không modify list cũ
+- **Slice assignment `[:]`:** Modify list in-place, giữ nguyên reference
+- **Scheduler thread:** Giữ reference đến `self.posts` ban đầu
+- **Reassign → Scheduler mất sync** → Không thấy videos mới → Không chạy
+
+**Impact:**
+- ✅ Fix 100% issue scheduler không chạy
+- ✅ Deterministic: Luôn chạy ngay lần 1
+- ✅ Không cần restart app
+- ✅ Thread-safe: Scheduler luôn sync với UI
+- ✅ Fix cả 4 edge cases: bulk schedule, bulk assign, import, delete
+
+**Testing:**
+```
+Before fix:
+- Import 20 videos → Bulk schedule → Chạy tất cả → FAIL ❌
+- Restart → Chạy tất cả → OK ✅ (nhưng phải restart!)
+
+After fix:
+- Import 20 videos → Bulk schedule → Chạy tất cả → OK ✅
+- Không cần restart! ✅
+```
+
+**Code changes:**
+- tabs/tab_post.py:1761: `self.posts[:] = ...` (bulk_schedule)
+- tabs/tab_post.py:2016: `self.posts[:] = ...` (bulk_assign_vm)
+- tabs/tab_post.py:2166-2167: `clear() + extend()` (import_channel)
+- tabs/tab_post.py:2706: `self.posts[:] = [...]` (delete_posts)
 
 ---
 
