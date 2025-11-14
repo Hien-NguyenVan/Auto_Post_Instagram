@@ -437,343 +437,436 @@ class PostScheduler(threading.Thread):
             vm_acquired = True
             post.log(f"✅ Đã khóa máy ảo '{post.vm_name}'")
 
-            # Check if VM is running
-            try:
-                result = subprocess.run(
-                    [LDCONSOLE_EXE, "list2"],
-                    capture_output=True,
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                is_running = False
-                for line in result.stdout.splitlines():
-                    parts = line.split(",")
-                    if len(parts) >= 5 and parts[1].strip() == post.vm_name:
-                        is_running = (parts[4].strip() == "1")
+            # ========== RETRY LOOP: Thử tối đa 2 lần ==========
+            max_attempts = 2
+            final_success = False
+
+            for attempt in range(1, max_attempts + 1):
+                attempt_success = False
+                attempt_temp_video_path = None
+
+                try:
+                    if attempt > 1:
+                        post.log(f"🔄 Retry lần {attempt}/{max_attempts}")
+                        # Reset video path về URL gốc để download lại
+                        if is_url:
+                            post.video_path = original_video_path
+                    else:
+                        post.log(f"📝 Lần thử {attempt}/{max_attempts}")
+
+                    # Check if VM is running
+                    try:
+                        result = subprocess.run(
+                            [LDCONSOLE_EXE, "list2"],
+                            capture_output=True,
+                            text=True,
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        is_running = False
+                        for line in result.stdout.splitlines():
+                            parts = line.split(",")
+                            if len(parts) >= 5 and parts[1].strip() == post.vm_name:
+                                is_running = (parts[4].strip() == "1")
+                                break
+        
+                        if is_running:
+                            # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
+                            post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
+        
+                            # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                            # LDPlayer sẽ tự động setup lại ADB connection khi reboot
+        
+                            subprocess.run(
+                                [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+                        else:
+                            # VM chưa chạy → Bật mới
+                            post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
+        
+                            # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
+                            # LDPlayer sẽ tự động setup lại ADB connection khi launch
+        
+                            subprocess.run(
+                                [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW
+                            )
+        
+                    except Exception as e:
+                        post.log(f"⚠️ Không thể kiểm tra trạng thái VM: {e}")
+                        # Nếu lỗi kiểm tra, cố gắng bật VM
+                        post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+        
+                    # Wait for VM to be fully ready
+                    post.log(f"⏳ Chờ máy ảo '{post.vm_name}' khởi động hoàn toàn...")
+                    if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120, log_callback=post.log):
+                        post.log(f"⏱️ Timeout - Máy ảo '{post.vm_name}' không khởi động được")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        raise Exception("Attempt failed")
+        
+                    # Wait for ADB to connect
+                    post.log(f"⏳ Chờ ADB kết nối...")
+                    if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=post.log):
+                        post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
+                        post.log(f"🛑 Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # Check stop request after VM start
+                    if post.stop_requested:
+                        post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        post.is_paused = True
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # ⚡ v1.5.9: DOWNLOAD VIDEO SAU KHI ACQUIRE VM (tối ưu disk usage)
+                    # Flow mới: Chỉ download khi đã có VM sẵn sàng → Không tốn disk khi chờ
+                    if is_url:
+                        # Detect platform from URL
+                        is_youtube = "youtube.com" in original_video_path or "youtu.be" in original_video_path
+        
+                        if is_youtube:
+                            # Download YouTube video
+                            post.log(f"📥 Đang tải video YouTube từ URL...")
+                            try:
+                                video_path = download_video_api(
+                                    original_video_path,
+                                    log_callback=lambda msg: post.log(msg)
+                                )
+        
+                                if not video_path or not os.path.exists(video_path):
+                                    post.log(f"❌ Không thể tải video YouTube")
+                                    post.status = "failed"
+                                    self.ui_queue.put(("status_update", post.id, "failed"))
+                                    self.running_posts.discard(post.id)
+                                    save_scheduled_posts(self.posts)
+                                    # Cleanup VM
+                                    subprocess.run(
+                                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                        creationflags=subprocess.CREATE_NO_WINDOW
+                                    )
+                                    vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
+                                    raise Exception("Attempt failed")
+        
+                                post.log(f"✅ Đã tải video YouTube: {os.path.basename(video_path)}")
+                                temp_video_path = video_path  # Mark for cleanup later
+                                post.video_path = video_path  # Update to local path
+        
+                            except Exception as e:
+                                post.log(f"❌ Lỗi khi tải video YouTube: {e}")
+                                post.status = "failed"
+                                self.ui_queue.put(("status_update", post.id, "failed"))
+                                self.running_posts.discard(post.id)
+                                save_scheduled_posts(self.posts)
+                                # Cleanup VM
+                                subprocess.run(
+                                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                    creationflags=subprocess.CREATE_NO_WINDOW
+                                )
+                                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
+                                raise Exception("Attempt failed")
+        
+                        else:
+                            # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
+                            post.log(f"📥 Đang tải video TikTok từ URL...")
+                            try:
+                                video_path = download_tiktok_direct_url(
+                                    original_video_path,
+                                    log_callback=lambda msg: post.log(msg)
+                                )
+        
+                                if not video_path or not os.path.exists(video_path):
+                                    post.log(f"❌ Không thể tải video TikTok")
+                                    post.status = "failed"
+                                    self.ui_queue.put(("status_update", post.id, "failed"))
+                                    self.running_posts.discard(post.id)
+                                    save_scheduled_posts(self.posts)
+                                    # Cleanup VM
+                                    subprocess.run(
+                                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                        creationflags=subprocess.CREATE_NO_WINDOW
+                                    )
+                                    vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
+                                    raise Exception("Attempt failed")
+        
+                                post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
+                                temp_video_path = video_path  # Mark for cleanup later
+                                post.video_path = video_path  # Update to local path
+        
+                            except Exception as e:
+                                post.log(f"❌ Lỗi khi tải video TikTok: {e}")
+                                post.status = "failed"
+                                self.ui_queue.put(("status_update", post.id, "failed"))
+                                self.running_posts.discard(post.id)
+                                save_scheduled_posts(self.posts)
+                                # Cleanup VM
+                                subprocess.run(
+                                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                    creationflags=subprocess.CREATE_NO_WINDOW
+                                )
+                                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
+                                raise Exception("Attempt failed")
+        
+                        time.sleep(WAIT_SHORT)
+        
+                    # Clear DCIM and Pictures folders before sending file
+                    post.log(f"🗑️ Xóa DCIM và Pictures...")
+                    try:
+                        clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
+                        clear_pictures(adb_address, log_callback=lambda msg: post.log(msg))
+                        post.log(f"✅ Đã xóa DCIM và Pictures")
+                    except Exception as e:
+                        post.log(f"⚠️ Lỗi khi xóa DCIM/Pictures: {e}")
+        
+                    # Send file to VM
+                    post.log(f"📤 Gửi file vào máy ảo...")
+                    try:
+                        success_push = send_file_api(
+                            post.video_path,
+                            post.vm_name,
+                            adb_path=ADB_EXE,  # Dùng ADB_EXE từ config, không hardcode
+                            log_callback=lambda msg: post.log(msg)
+                        )
+                    except Exception as e:
+                        success_push = False
+                        post.log(f"❌ Lỗi gửi file: {e}")
+        
+                    if not success_push:
+                        post.log(f"❌ Gửi file thất bại")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+        
+                        # Cleanup
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    post.log(f"✅ Đã gửi file thành công")
+                    time.sleep(WAIT_MEDIUM)
+        
+                    # Check stop request after sending file
+                    if post.stop_requested:
+                        post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        post.is_paused = True
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # Check stop request before posting
+                    if post.stop_requested:
+                        post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        post.is_paused = True
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # Post to Instagram
+                    post.log(f"📲 Đang đăng video: {post.title}")
+                    # Extract video filename for MediaStore broadcast retry
+                    video_filename = os.path.basename(post.video_path) if post.video_path else None
+                    # ✅ FIX BUG #5: Dùng auto_poster local thay vì shared
+                    success = auto_poster.auto_post(
+                        post.vm_name, adb_address, post.title,
+                        use_launchex=True, ldconsole_exe=LDCONSOLE_EXE,
+                        video_filename=video_filename
+                    )
+        
+                    if not success:
+                        post.log(f"❌ Đăng bài thất bại")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+        
+                        # Cleanup
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    post.log(f"✅ Đã đăng thành công!")
+        
+                    # Check stop request after posting
+                    if post.stop_requested:
+                        post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        post.is_paused = True
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # Delete file from VM
+                    post.log(f"🗑️ Xóa file trong máy ảo...")
+                    try:
+                        clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
+                    except Exception as e:
+                        post.log(f"⚠️ Lỗi khi xóa file: {e}")
+        
+                    time.sleep(WAIT_MEDIUM)
+        
+                    # Check stop request after deleting files
+                    if post.stop_requested:
+                        post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        post.is_paused = True
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+        
+                    # Turn off VM
+                    post.log(f"🛑 Tắt máy ảo...")
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
+                    time.sleep(WAIT_EXTRA_LONG)
+                    post.log(f"✅ Đã tắt máy ảo hoàn toàn")
+        
+                    # Mark as posted
+                    post.status = "posted"
+                    attempt_success = True
+                    attempt_temp_video_path = temp_video_path
+                    post.log(f"✅ Lần thử {attempt} thành công!")
+
+                except Exception as attempt_error:
+                    post.log(f"⚠️ Lần thử {attempt} thất bại: {attempt_error}")
+                    attempt_success = False
+
+                    # Nếu user nhấn stop, KHÔNG retry
+                    if post.stop_requested:
+                        post.log(f"🛑 User yêu cầu dừng - Không retry")
                         break
 
-                if is_running:
-                    # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
-                    post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
+                    # Cleanup giữa các retry (nếu không phải lần cuối)
+                    if attempt < max_attempts:
+                        post.log(f"🔄 Đang cleanup để retry...")
 
-                    # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
-                    # LDPlayer sẽ tự động setup lại ADB connection khi reboot
+                        # Xóa file trong VM
+                        try:
+                            post.log(f"🗑️ Xóa file trong máy ảo...")
+                            clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
+                        except Exception as e:
+                            post.log(f"⚠️ Không thể xóa file trong VM: {e}")
 
-                    subprocess.run(
-                        [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-                else:
-                    # VM chưa chạy → Bật mới
-                    post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
-
-                    # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
-                    # LDPlayer sẽ tự động setup lại ADB connection khi launch
-
-                    subprocess.run(
-                        [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-
-            except Exception as e:
-                post.log(f"⚠️ Không thể kiểm tra trạng thái VM: {e}")
-                # Nếu lỗi kiểm tra, cố gắng bật VM
-                post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-
-            # Wait for VM to be fully ready
-            post.log(f"⏳ Chờ máy ảo '{post.vm_name}' khởi động hoàn toàn...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120, log_callback=post.log):
-                post.log(f"⏱️ Timeout - Máy ảo '{post.vm_name}' không khởi động được")
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                return
-
-            # Wait for ADB to connect
-            post.log(f"⏳ Chờ ADB kết nối...")
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=post.log):
-                post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
-                post.log(f"🛑 Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Check stop request after VM start
-            if post.stop_requested:
-                post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                post.is_paused = True
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # ⚡ v1.5.9: DOWNLOAD VIDEO SAU KHI ACQUIRE VM (tối ưu disk usage)
-            # Flow mới: Chỉ download khi đã có VM sẵn sàng → Không tốn disk khi chờ
-            if is_url:
-                # Detect platform from URL
-                is_youtube = "youtube.com" in original_video_path or "youtu.be" in original_video_path
-
-                if is_youtube:
-                    # Download YouTube video
-                    post.log(f"📥 Đang tải video YouTube từ URL...")
-                    try:
-                        video_path = download_video_api(
-                            original_video_path,
-                            log_callback=lambda msg: post.log(msg)
-                        )
-
-                        if not video_path or not os.path.exists(video_path):
-                            post.log(f"❌ Không thể tải video YouTube")
-                            post.status = "failed"
-                            self.ui_queue.put(("status_update", post.id, "failed"))
-                            self.running_posts.discard(post.id)
-                            save_scheduled_posts(self.posts)
-                            # Cleanup VM
+                        # Quit VM
+                        try:
+                            post.log(f"🛑 Tắt máy ảo để retry...")
                             subprocess.run(
                                 [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
                                 creationflags=subprocess.CREATE_NO_WINDOW
                             )
                             vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
                             time.sleep(WAIT_EXTRA_LONG)
-                            return
+                        except Exception as e:
+                            post.log(f"⚠️ Không thể tắt VM: {e}")
 
-                        post.log(f"✅ Đã tải video YouTube: {os.path.basename(video_path)}")
-                        temp_video_path = video_path  # Mark for cleanup later
-                        post.video_path = video_path  # Update to local path
+                        # Xóa temp file
+                        if attempt_temp_video_path and os.path.exists(attempt_temp_video_path):
+                            try:
+                                os.remove(attempt_temp_video_path)
+                                post.log(f"🗑️ Đã xóa file temp để retry")
+                            except Exception as e:
+                                post.log(f"⚠️ Không thể xóa temp file: {e}")
 
-                    except Exception as e:
-                        post.log(f"❌ Lỗi khi tải video YouTube: {e}")
-                        post.status = "failed"
-                        self.ui_queue.put(("status_update", post.id, "failed"))
-                        self.running_posts.discard(post.id)
-                        save_scheduled_posts(self.posts)
-                        # Cleanup VM
-                        subprocess.run(
-                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                        time.sleep(WAIT_EXTRA_LONG)
-                        return
+                        post.log(f"⏳ Chờ 5 giây trước khi retry...")
+                        time.sleep(5)
 
-                else:
-                    # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
-                    post.log(f"📥 Đang tải video TikTok từ URL...")
-                    try:
-                        video_path = download_tiktok_direct_url(
-                            original_video_path,
-                            log_callback=lambda msg: post.log(msg)
-                        )
+                # Check if attempt succeeded
+                if attempt_success:
+                    final_success = True
+                    temp_video_path = attempt_temp_video_path
+                    break  # Exit retry loop
 
-                        if not video_path or not os.path.exists(video_path):
-                            post.log(f"❌ Không thể tải video TikTok")
-                            post.status = "failed"
-                            self.ui_queue.put(("status_update", post.id, "failed"))
-                            self.running_posts.discard(post.id)
-                            save_scheduled_posts(self.posts)
-                            # Cleanup VM
-                            subprocess.run(
-                                [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                                creationflags=subprocess.CREATE_NO_WINDOW
-                            )
-                            vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                            time.sleep(WAIT_EXTRA_LONG)
-                            return
+            # ========== KẾT THÚC RETRY LOOP ==========
 
-                        post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
-                        temp_video_path = video_path  # Mark for cleanup later
-                        post.video_path = video_path  # Update to local path
-
-                    except Exception as e:
-                        post.log(f"❌ Lỗi khi tải video TikTok: {e}")
-                        post.status = "failed"
-                        self.ui_queue.put(("status_update", post.id, "failed"))
-                        self.running_posts.discard(post.id)
-                        save_scheduled_posts(self.posts)
-                        # Cleanup VM
-                        subprocess.run(
-                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                        time.sleep(WAIT_EXTRA_LONG)
-                        return
-
-                time.sleep(WAIT_SHORT)
-
-            # Clear DCIM and Pictures folders before sending file
-            post.log(f"🗑️ Xóa DCIM và Pictures...")
-            try:
-                clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
-                clear_pictures(adb_address, log_callback=lambda msg: post.log(msg))
-                post.log(f"✅ Đã xóa DCIM và Pictures")
-            except Exception as e:
-                post.log(f"⚠️ Lỗi khi xóa DCIM/Pictures: {e}")
-
-            # Send file to VM
-            post.log(f"📤 Gửi file vào máy ảo...")
-            try:
-                success_push = send_file_api(
-                    post.video_path,
-                    post.vm_name,
-                    adb_path=ADB_EXE,  # Dùng ADB_EXE từ config, không hardcode
-                    log_callback=lambda msg: post.log(msg)
-                )
-            except Exception as e:
-                success_push = False
-                post.log(f"❌ Lỗi gửi file: {e}")
-
-            if not success_push:
-                post.log(f"❌ Gửi file thất bại")
+            # Kiểm tra kết quả cuối cùng
+            if not final_success:
+                post.log(f"❌ Đăng bài thất bại sau {max_attempts} lần thử")
                 post.status = "failed"
                 self.ui_queue.put(("status_update", post.id, "failed"))
 
-                # Cleanup
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
+                # Final cleanup
+                try:
+                    subprocess.run(
+                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                    time.sleep(WAIT_EXTRA_LONG)
+                except:
+                    pass
+
                 self.running_posts.discard(post.id)
                 save_scheduled_posts(self.posts)
                 return
 
-            post.log(f"✅ Đã gửi file thành công")
-            time.sleep(WAIT_MEDIUM)
-
-            # Check stop request after sending file
-            if post.stop_requested:
-                post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                post.is_paused = True
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Check stop request before posting
-            if post.stop_requested:
-                post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                post.is_paused = True
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Post to Instagram
-            post.log(f"📲 Đang đăng video: {post.title}")
-            # Extract video filename for MediaStore broadcast retry
-            video_filename = os.path.basename(post.video_path) if post.video_path else None
-            # ✅ FIX BUG #5: Dùng auto_poster local thay vì shared
-            success = auto_poster.auto_post(
-                post.vm_name, adb_address, post.title,
-                use_launchex=True, ldconsole_exe=LDCONSOLE_EXE,
-                video_filename=video_filename
-            )
-
-            if not success:
-                post.log(f"❌ Đăng bài thất bại")
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-
-                # Cleanup
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            post.log(f"✅ Đã đăng thành công!")
-
-            # Check stop request after posting
-            if post.stop_requested:
-                post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                post.is_paused = True
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Delete file from VM
-            post.log(f"🗑️ Xóa file trong máy ảo...")
-            try:
-                clear_dcim(adb_address, log_callback=lambda msg: post.log(msg))
-            except Exception as e:
-                post.log(f"⚠️ Lỗi khi xóa file: {e}")
-
-            time.sleep(WAIT_MEDIUM)
-
-            # Check stop request after deleting files
-            if post.stop_requested:
-                post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                post.is_paused = True
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Turn off VM
-            post.log(f"🛑 Tắt máy ảo...")
-            subprocess.run(
-                [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)  # Đợi VM tắt hoàn toàn
-            time.sleep(WAIT_EXTRA_LONG)
-            post.log(f"✅ Đã tắt máy ảo hoàn toàn")
-
-            # Mark as posted
-            post.status = "posted"
             post.log(f"✅ Hoàn tất!")
             self.ui_queue.put(("status_update", post.id, "posted"))
 
