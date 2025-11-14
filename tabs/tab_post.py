@@ -1738,7 +1738,22 @@ class PostTab(ctk.CTkFrame):
                 )
                 if r.returncode == 0:
                     if not r.stdout:
-                        log(f"  ! ffprobe stdout is empty")
+                        log(f"  ! ffprobe stdout is empty (returncode=0 but no output)")
+                        if r.stderr:
+                            log(f"  ! ffprobe stderr: {r.stderr[:300]}")
+                        log(f"  ! File path: {src}")
+
+                        # Chạy lại KHÔNG dùng -v quiet để lấy error message
+                        log(f"  > Chạy lại ffprobe với verbose error để debug...")
+                        r2 = subprocess.run(
+                            ["ffprobe", "-print_format", "json", "-show_format", src],
+                            stdin=subprocess.DEVNULL,
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        if r2.stderr:
+                            log(f"  ! ffprobe verbose stderr: {r2.stderr[:500]}")
                         return None
                     data = json.loads(r.stdout)
                     return float(data["format"]["duration"])
@@ -1770,20 +1785,33 @@ class PostTab(ctk.CTkFrame):
             if name != name_cleaned:
                 # Tên có ký tự đặc biệt → Rename file gốc
                 new_src = os.path.join(folder, name_cleaned + ext)
-                log(f"  > Rename: {name_cleaned}{ext}")
+                log(f"  > Phát hiện ký tự đặc biệt trong tên file")
+                log(f"  > Tên cũ: {name}")
+                log(f"  > Tên mới: {name_cleaned}")
+                log(f"  > Đang rename file gốc...")
                 try:
                     os.rename(src, new_src)
                     src = new_src
+                    log(f"  > Rename OK: {name_cleaned}{ext}")
+                    log(f"  > File path mới: {src}")
                 except Exception as e:
-                    log(f"  ! Không rename được: {e}")
+                    log(f"  ! Không rename được: {type(e).__name__}: {e}")
                     # Không rename được → Copy sang temp
                     import tempfile
                     import shutil
                     temp_dir = tempfile.gettempdir()
                     new_src = os.path.join(temp_dir, name_cleaned + ext)
-                    log(f"  > Copy sang temp: {new_src}")
-                    shutil.copy2(src, new_src)
-                    src = new_src
+                    log(f"  > Đang copy sang temp folder: {new_src}")
+                    try:
+                        shutil.copy2(src, new_src)
+                        src = new_src
+                        log(f"  > Copy OK! Dùng file temp để xử lý")
+                        log(f"  > File path: {src}")
+                    except Exception as e2:
+                        log(f"  ! Copy cũng fail: {type(e2).__name__}: {e2}")
+                        log(f"  ! Sẽ thử dùng file gốc (có thể fail)")
+            else:
+                log(f"  > Tên file OK, không cần clean")
 
             # Đọc duration từ file đã clean
             dur = get_duration(src)

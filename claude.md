@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-14
-> **Phiên bản hiện tại:** v1.5.21
+> **Phiên bản hiện tại:** v1.5.23
 
 ---
 
@@ -336,7 +336,24 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.21 (2025-11-14) - Current Version
+### v1.5.23 (2025-11-14) - Current Version
+**🔍 DEBUG IMPROVEMENT: Enhanced logging for video split tool**
+- Cải thiện logging chi tiết để debug lỗi "ffprobe stdout is empty"
+- Thêm verbose ffprobe retry khi stdout empty (không dùng `-v quiet`)
+- Log stderr chi tiết khi ffprobe returncode=0 nhưng stdout empty
+- Thêm detailed logging cho rename/copy file:
+  - Log tên file cũ/mới khi detect ký tự đặc biệt
+  - Log file path trước và sau rename/copy
+  - Log exception type và message khi rename/copy fail
+- Giúp user debug chính xác vấn đề khi cắt video fail
+
+### v1.5.22 (2025-11-14)
+**🐛 FIX: Cắt video đều nhau bằng -t (duration)**
+- Fix video 57:32 cắt 3 phần → Part 1: 14:01, Part 2: 28:00, Part 3: 14:08 (mất 15 phút)
+- Đổi từ `-to` (absolute time) sang `-t` (duration) để cắt chính xác
+- Example: Video 57:32 / 3 parts → Mỗi part ~19 phút (thay vì 14-28-14)
+
+### v1.5.21 (2025-11-14)
 **🐛 CRITICAL FIX: Split video - Rename file with special chars before ffprobe**
 - Fix TypeError: JSON object must be str (khi file có curly quotes `"Ghost Viper"`)
 - Auto rename file gốc trước khi đọc duration và split
