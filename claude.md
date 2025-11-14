@@ -1,8 +1,8 @@
 # 📋 CLAUDE.MD - Tài liệu Tổng quan Project
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
-> **Cập nhật lần cuối:** 2025-11-13
-> **Phiên bản hiện tại:** v1.5.13
+> **Cập nhật lần cuối:** 2025-11-14
+> **Phiên bản hiện tại:** v1.5.21
 
 ---
 
@@ -329,7 +329,76 @@ with Timer("Operation name"):
 
 ## 📜 LỊCH SỬ PHIÊN BẢN
 
-### v1.5.12 (2025-11-13) - Current Version
+> ⚠️ **QUY TẮC VERSION NUMBERING:**
+> - Mỗi lần push git, **PHẢI tăng số version**
+> - Format: `v1.5.X` → `v1.5.(X+1)` (tăng số cuối)
+> - **KHÔNG dùng lại số cũ + text** (VD: ~~v1.5.20.1~~, ~~v1.5.20-hotfix~~)
+> - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
+> - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
+
+### v1.5.21 (2025-11-14) - Current Version
+**🐛 CRITICAL FIX: Split video - Rename file with special chars before ffprobe**
+- Fix TypeError: JSON object must be str (khi file có curly quotes `"Ghost Viper"`)
+- Auto rename file gốc trước khi đọc duration và split
+- Fallback copy sang temp nếu rename fail
+- Thêm detailed error logging cho debug (ffprobe/ffmpeg stderr, exception type)
+- Fix clean curly quotes (Unicode): `"` `"` `'` `'`
+
+### v1.5.20 (2025-11-14)
+**✨ FEATURE: Smart multi-part video splitting**
+- Clean filename: Loại bỏ ký tự đặc biệt `< > : " / \ | ? *`
+- Cắt thông minh theo thời lượng:
+  - < 39 phút → 2 phần
+  - < 58 phút → 3 phần
+  - < 78 phút → 4 phần
+  - ≥ 78 phút → 5 phần
+- Output: `{name}-part1.mp4`, `part2.mp4`, ..., `partN.mp4`
+
+### v1.5.19 (2025-11-14)
+**✨ FEATURE: Add video split tool to tab_post**
+- Thêm nút "✂️ Cắt video" kế bên nút YouTube import
+- Dialog cắt video thành 2 phần (không re-encode, dùng ffmpeg -c copy)
+- Standalone feature, không ảnh hưởng posting workflow
+- Fix ffmpeg timeout issue (stdin hang) bằng `subprocess.DEVNULL`
+
+### v1.5.18 (2025-11-13)
+**🐛 FIX: Share button improvements**
+- Thêm enabled state check trước khi click Share
+- Sửa post notification wait logic (wait ít nhất 15 iterations)
+- Di chuyển "No thanks" button click vào wait loop
+- 3 distinct error cases với detailed logging + screenshots
+
+### v1.5.17 (2025-11-13)
+**✨ FEATURE: Retry mechanism for posting**
+- Thử tối đa 2 lần (1 lần retry) khi post fail
+- Cleanup giữa các retry: Xóa file VM, quit VM, xóa temp, đợi 5s
+- Download lại video từ URL khi retry
+- Không retry nếu user nhấn stop
+- Full cleanup sau 2 lần fail: Release VM lock
+
+### v1.5.16 (2025-11-13)
+**🔄 REVERT: Remove VM reset mechanism**
+- Loại bỏ VM reset trước khi mở Instagram
+- Reset gây timeout, VM stuck ở status=2
+- Trả về code cũ (v1.5.14)
+
+### v1.5.15 (2025-11-13) - CANCELLED
+**❌ FAILED: Add VM reset before Instagram posting**
+- Thêm reset VM trước khi mở Instagram
+- Gây VM timeout, không shutdown được
+- Đã revert trong v1.5.16
+
+### v1.5.14 (2025-11-13)
+**🔄 BASE VERSION**
+- Baseline trước khi thử VM reset mechanism
+
+### v1.5.13 (2025-11-13)
+**🐛 FIX: Table không cập nhật khi xóa video**
+- Update `self.displayed_posts` sau khi xóa khỏi `self.posts`
+- Sync 2 lists để UI reflect đúng data
+- Giữ thứ tự sort hiện tại
+
+### v1.5.12 (2025-11-13)
 **✨ FEATURE: Add "Huỷ tất cả" button to bulk schedule and bulk assign VM**
 - Thêm nút "🗑️ Huỷ tất cả" trong dialog Lên lịch hàng loạt
 - Thêm nút "🗑️ Huỷ tất cả" trong dialog Đặt máy ảo hàng loạt
