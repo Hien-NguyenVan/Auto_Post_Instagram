@@ -1716,10 +1716,13 @@ class PostTab(ctk.CTkFrame):
 
         def clean_filename(filename):
             """Loại bỏ ký tự đặc biệt khỏi tên file"""
-            # Loại bỏ: " ? \ / : * < > |
+            # Loại bỏ Windows invalid chars
             invalid_chars = '<>:"/\\|?*'
             for char in invalid_chars:
                 filename = filename.replace(char, '')
+            # Loại bỏ curly quotes (Unicode)
+            filename = filename.replace('"', '').replace('"', '')  # Curly double quotes
+            filename = filename.replace(''', '').replace(''', '')  # Curly single quotes
             # Loại bỏ khoảng trắng thừa
             filename = ' '.join(filename.split())
             return filename.strip()
