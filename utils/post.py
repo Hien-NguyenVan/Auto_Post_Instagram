@@ -316,10 +316,20 @@ class InstagramPost(BaseInstagramAutomation):
 
             # Click Share
             self.log(vm_name, "🔑 Nhấn Share")
-            if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT,
-                                  vm_name=vm_name, timeout=2, description="Share button"):
-                self.log(vm_name, "❌ Không tìm thấy nút Share", "ERROR")
-                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút Share - UI upload có thể đã thay đổi")
+            if self.wait_for_element(d, XPATH_SHARE_BUTTON, vm_name=vm_name, description="nút share", timeout=WAIT_MEDIUM):
+                if d.xpath(XPATH_SHARE_BUTTON).info["enabled"] is True:
+                    if not self.safe_click(d, XPATH_SHARE_BUTTON, sleep_after=WAIT_SHORT,
+                                        vm_name=vm_name, timeout=2, description="Share button"):
+                        self.log(vm_name, "❌ Nút share đã enable nhưng không ấn được", "ERROR")
+                        self._capture_failure_screenshot(adb_address, vm_name, "Nút share đã enable nhưng không ấn được - UI upload có thể đã thay đổi")
+                        return False
+                else:
+                    self.log(vm_name,"❌ Nút share không enable","ERROR")
+                    self._capture_failure_screenshot(adb_address, vm_name, "Nút share không enable")
+                    return False
+            else:
+                self.log(vm_name, "❌ Không tìm thấy nút share", "ERROR")
+                self._capture_failure_screenshot(adb_address, vm_name, "Không tìm thấy nút share")
                 return False
 
             # Click allow 
@@ -345,15 +355,15 @@ class InstagramPost(BaseInstagramAutomation):
                           vm_name=vm_name, optional=True, timeout=2)
 
             # Click "No thanks" if exists
-            self.log(vm_name, "🔑 Nhấn No thanks (nếu có)")
-            self.safe_click(d, XPATH_CANCEL_BUTTON_ID, sleep_after=1,
-                          vm_name=vm_name, optional=True, timeout=3)
+            # self.log(vm_name, "🔑 Nhấn No thanks (nếu có)")
+            # self.safe_click(d, XPATH_CANCEL_BUTTON_ID, sleep_after=1,
+            #               vm_name=vm_name, optional=True, timeout=3)
 
             # Wait for post notification
             self.log(vm_name, "⏳ Chờ đăng bài...")
             for i in range(MAX_RETRY_POST_NOTIFICATION):
-                if not d.xpath(XPATH_progress_bar).exists:
-                    self.log(vm_name, "✅ Đã có thông báo đăng bài!")
+                if (not d.xpath(XPATH_progress_bar).exists and i > 15):
+                    self.log(vm_name, "✅ Đã mất thanh tiến trình!")
                     break
                 
                 if d.xpath(XPATH_PENDING_MEDIA).exists:
@@ -364,6 +374,10 @@ class InstagramPost(BaseInstagramAutomation):
                     self.log(vm_name, "❌ Đăng không thành công - Instagram từ chối post")
                     self._capture_failure_screenshot(adb_address, vm_name, "Instagram từ chối đăng bài - Có thể video vi phạm guidelines hoặc UI thay đổi")
                     return False
+
+                if d.xpath(XPATH_CANCEL_BUTTON_ID).exists:
+                    self.safe_click(d, XPATH_CANCEL_BUTTON_ID, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=3)
 
                 time.sleep(WAIT_SHORT)
             else:
