@@ -1737,7 +1737,11 @@ class PostTab(ctk.CTkFrame):
                     timeout=30
                 )
                 if r.returncode == 0:
-                    return float(json.loads(r.stdout)["format"]["duration"])
+                    if not r.stdout:
+                        log(f"  ! ffprobe stdout is empty")
+                        return None
+                    data = json.loads(r.stdout)
+                    return float(data["format"]["duration"])
                 else:
                     log(f"  ! ffprobe returncode: {r.returncode}")
                     if r.stderr:
@@ -1757,6 +1761,31 @@ class PostTab(ctk.CTkFrame):
                 log(f"  X File không tồn tại: {src}")
                 return False
 
+            # Clean filename và RENAME file gốc nếu cần
+            folder = os.path.dirname(src)
+            name = os.path.splitext(os.path.basename(src))[0]
+            ext = os.path.splitext(os.path.basename(src))[1]
+            name_cleaned = clean_filename(name)
+
+            if name != name_cleaned:
+                # Tên có ký tự đặc biệt → Rename file gốc
+                new_src = os.path.join(folder, name_cleaned + ext)
+                log(f"  > Rename: {name_cleaned}{ext}")
+                try:
+                    os.rename(src, new_src)
+                    src = new_src
+                except Exception as e:
+                    log(f"  ! Không rename được: {e}")
+                    # Không rename được → Copy sang temp
+                    import tempfile
+                    import shutil
+                    temp_dir = tempfile.gettempdir()
+                    new_src = os.path.join(temp_dir, name_cleaned + ext)
+                    log(f"  > Copy sang temp: {new_src}")
+                    shutil.copy2(src, new_src)
+                    src = new_src
+
+            # Đọc duration từ file đã clean
             dur = get_duration(src)
             if not dur:
                 log("  X Không đọc được thời lượng - Xem log phía trên để biết lỗi")
@@ -1773,13 +1802,7 @@ class PostTab(ctk.CTkFrame):
             else:
                 num_parts = 5
 
-            # Clean filename
-            name = os.path.splitext(os.path.basename(src))[0]
-            name_cleaned = clean_filename(name)
-            if name != name_cleaned:
-                log(f"  > Tên sau clean: {name_cleaned}")
             name = name_cleaned
-
             log(f"  i Thời lượng: {dur_min:.1f} phút -> Cắt {num_parts} phần")
 
             # Tính thời lượng mỗi phần
