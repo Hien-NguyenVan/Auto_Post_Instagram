@@ -1651,181 +1651,133 @@ class PostTab(ctk.CTkFrame):
             )
 
     def split_video_dialog(self):
-        """Dialog cắt video thành 2 phần (không re-encode)"""
-        # Check ffmpeg installed
+        """Dialog cắt video thành 2 phần (không re-encode) - STANDALONE SIMPLE"""
+        # Check ffmpeg
         try:
-            subprocess.run(["ffmpeg", "-version"],
-                         capture_output=True, check=True, timeout=5)
-            subprocess.run(["ffprobe", "-version"],
-                         capture_output=True, check=True, timeout=5)
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            messagebox.showerror(
-                "Lỗi",
-                "Không tìm thấy ffmpeg/ffprobe!\n\n"
-                "Vui lòng cài đặt ffmpeg và thêm vào PATH."
-            )
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, timeout=5)
+            subprocess.run(["ffprobe", "-version"], capture_output=True, check=True, timeout=5)
+        except:
+            messagebox.showerror("Lỗi", "Không tìm thấy ffmpeg/ffprobe!\nVui lòng cài đặt ffmpeg.")
             return
 
-        # Create dialog
-        dialog = ctk.CTkToplevel(self.master)
-        dialog.title("✂️ Cắt video thành 2 phần")
-        dialog.geometry("700x550")
-        dialog.transient(self.master)
-        dialog.grab_set()
-
-        # Center dialog
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (700 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (550 // 2)
-        dialog.geometry(f"+{x}+{y}")
+        # Simple Toplevel window
+        dialog = tk.Toplevel(self.master)
+        dialog.title("Cắt video thành 2 phần")
+        dialog.geometry("650x500")
 
         # Header
-        header = ctk.CTkLabel(
-            dialog,
-            text="Chọn folder chứa video MP4 để cắt đôi",
-            font=(FONTS["family"], 14, "bold")
-        )
-        header.pack(pady=15)
+        tk.Label(dialog, text="Chọn folder chứa video MP4", font=("Arial", 12, "bold")).pack(pady=10)
 
-        # Folder selection
-        folder_frame = ctk.CTkFrame(dialog)
-        folder_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Folder frame
+        folder_frame = tk.Frame(dialog)
+        folder_frame.pack(pady=10)
 
-        folder_entry = ctk.CTkEntry(folder_frame, width=400, placeholder_text="Chọn folder...")
+        folder_entry = tk.Entry(folder_frame, width=50, font=("Arial", 10))
         folder_entry.pack(side=tk.LEFT, padx=5)
 
-        def browse_folder():
-            folder = filedialog.askdirectory(parent=dialog)
+        def browse():
+            folder = filedialog.askdirectory()
             if folder:
                 folder_entry.delete(0, tk.END)
                 folder_entry.insert(0, folder)
 
-        ctk.CTkButton(
-            folder_frame,
-            text="📂 Browse",
-            command=browse_folder,
-            width=100
-        ).pack(side=tk.LEFT, padx=5)
+        tk.Button(folder_frame, text="Browse", command=browse, width=10).pack(side=tk.LEFT)
 
-        # Log area
-        log_label = ctk.CTkLabel(dialog, text="Log:", font=(FONTS["family"], 12, "bold"))
-        log_label.pack(pady=(15, 5))
-
-        log_text = tk.Text(dialog, height=10, width=75, font=("Consolas", 9), bg="#2b2b2b", fg="white")
-        log_text.pack(padx=20, pady=5)
+        # Log
+        tk.Label(dialog, text="Log:", font=("Arial", 10, "bold")).pack(pady=5)
+        log_text = tk.Text(dialog, height=15, width=75, font=("Consolas", 9))
+        log_text.pack(padx=10, pady=5)
 
         def log(msg):
-            """Thread-safe logging"""
             dialog.after(0, lambda: log_text.insert(tk.END, msg + "\n") or log_text.see(tk.END))
 
-        # Split logic
-        def get_duration(video_path):
-            """Lấy thời lượng video"""
+        def get_duration(src):
             try:
                 r = subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-print_format", "json",
-                     "-show_format", video_path],
+                    ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", src],
                     capture_output=True, text=True, timeout=30
                 )
                 if r.returncode == 0:
-                    data = json.loads(r.stdout)
-                    return float(data["format"]["duration"])
+                    return float(json.loads(r.stdout)["format"]["duration"])
             except:
                 pass
             return None
 
-        def split_one_video(src, outdir):
-            """Cắt 1 video thành 2 phần"""
+        def split_one(src, outdir):
             dur = get_duration(src)
             if not dur:
-                log(f"  ❌ Không đọc được thời lượng")
+                log("  X Không đọc được thời lượng")
                 return False
 
             mid = dur / 2
             name = os.path.splitext(os.path.basename(src))[0]
-
             p1 = os.path.join(outdir, f"{name}-part1.mp4")
             p2 = os.path.join(outdir, f"{name}-part2.mp4")
 
-            # Part 1
-            log(f"  🔹 Đang tạo Part1...")
+            log("  - Đang tạo Part1...")
             r1 = subprocess.run(
-                ["ffmpeg", "-y", "-ss", "0", "-i", src, "-to", str(mid),
-                 "-c", "copy", "-avoid_negative_ts", "1", p1],
-                capture_output=True, text=True
+                ["ffmpeg", "-y", "-ss", "0", "-i", src, "-to", str(mid), "-c", "copy", "-avoid_negative_ts", "1", p1],
+                capture_output=True
             )
-
             if r1.returncode != 0 or not os.path.exists(p1) or os.path.getsize(p1) == 0:
-                log(f"  ❌ Part1 thất bại")
+                log("  X Part1 thất bại")
                 return False
 
-            # Part 2
-            log(f"  🔹 Đang tạo Part2...")
+            log("  - Đang tạo Part2...")
             r2 = subprocess.run(
-                ["ffmpeg", "-y", "-ss", str(mid), "-i", src,
-                 "-c", "copy", "-avoid_negative_ts", "1", p2],
-                capture_output=True, text=True
+                ["ffmpeg", "-y", "-ss", str(mid), "-i", src, "-c", "copy", "-avoid_negative_ts", "1", p2],
+                capture_output=True
             )
-
             if r2.returncode != 0 or not os.path.exists(p2) or os.path.getsize(p2) == 0:
-                log(f"  ❌ Part2 thất bại")
+                log("  X Part2 thất bại")
                 return False
 
-            log(f"  ✅ Xong: {os.path.basename(p1)} + {os.path.basename(p2)}\n")
+            log(f"  OK: {os.path.basename(p1)} + {os.path.basename(p2)}\n")
             return True
 
-        def process_videos():
-            """Process tất cả videos trong folder"""
+        def run():
             folder = folder_entry.get().strip()
             if not os.path.isdir(folder):
-                messagebox.showerror("Lỗi", "Folder không hợp lệ!", parent=dialog)
+                messagebox.showerror("Lỗi", "Folder không hợp lệ!")
                 return
 
             log_text.delete("1.0", tk.END)
-            log("🚀 Bắt đầu xử lý...\n")
+            log("Bắt đầu...\n")
 
             videos = [f for f in os.listdir(folder) if f.lower().endswith(".mp4")]
             if not videos:
-                log("❌ Không có file .mp4 trong folder")
-                messagebox.showwarning("Cảnh báo", "Không có file .mp4!", parent=dialog)
+                log("X Không có file .mp4")
+                messagebox.showwarning("Cảnh báo", "Không có file .mp4!")
                 return
 
             outdir = os.path.join(folder, "output")
             os.makedirs(outdir, exist_ok=True)
-
-            log(f"📂 Tìm thấy {len(videos)} video")
-            log(f"📁 Output: {outdir}\n")
+            log(f"Tìm thấy {len(videos)} video\nOutput: {outdir}\n")
 
             success = 0
-            for idx, v in enumerate(videos, 1):
-                log(f"[{idx}/{len(videos)}] 🎬 {v}")
-                if split_one_video(os.path.join(folder, v), outdir):
+            for i, v in enumerate(videos, 1):
+                log(f"[{i}/{len(videos)}] {v}")
+                if split_one(os.path.join(folder, v), outdir):
                     success += 1
 
             log(f"\n{'='*50}")
-            log(f"🎉 HOÀN TẤT!")
-            log(f"✅ Thành công: {success}/{len(videos)}")
-            log(f"📁 Output: {outdir}")
+            log(f"HOÀN TẤT! Thành công: {success}/{len(videos)}")
+            log(f"Output: {outdir}")
+            messagebox.showinfo("Hoàn tất", f"Xong!\n\nThành công: {success}/{len(videos)}\n\nOutput: {outdir}")
 
-            messagebox.showinfo(
-                "Hoàn tất",
-                f"Đã xử lý xong!\n\n✅ Thành công: {success}/{len(videos)}\n\nOutput: {outdir}",
-                parent=dialog
-            )
+        def start():
+            threading.Thread(target=run, daemon=True).start()
 
-        def start_split():
-            """Start processing in background thread"""
-            threading.Thread(target=process_videos, daemon=True).start()
-
-        # Start button
-        ctk.CTkButton(
+        # BIG START BUTTON
+        tk.Button(
             dialog,
-            text="✂️ BẮT ĐẦU CẮT",
-            command=start_split,
-            **get_button_style("primary"),
-            width=200,
-            height=40,
-            font=(FONTS["family"], 14, "bold")
+            text="BẮT ĐẦU CẮT",
+            command=start,
+            bg="#0078D4",
+            fg="white",
+            font=("Arial", 14, "bold"),
+            width=20,
+            height=2
         ).pack(pady=15)
 
     def bulk_schedule(self):
