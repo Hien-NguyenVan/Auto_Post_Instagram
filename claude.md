@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-14
-> **Phiên bản hiện tại:** v1.5.23
+> **Phiên bản hiện tại:** v1.5.24
 
 ---
 
@@ -336,7 +336,14 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.23 (2025-11-14) - Current Version
+### v1.5.24 (2025-11-14) - Current Version
+**🗑️ REMOVE FEATURE: Loại bỏ chức năng cắt video**
+- Xóa nút "✂️ Cắt video" khỏi UI (tab_post row 1)
+- Xóa toàn bộ function `split_video_dialog()` (272 dòng code)
+- Lý do: Chức năng không cần thiết cho core workflow của tool
+- Giảm complexity: Tool tập trung vào posting automation thay vì video editing
+
+### v1.5.23 (2025-11-14)
 **🔍 DEBUG IMPROVEMENT: Enhanced logging for video split tool**
 - Cải thiện logging chi tiết để debug lỗi "ffprobe stdout is empty"
 - Thêm verbose ffprobe retry khi stdout empty (không dùng `-v quiet`)
