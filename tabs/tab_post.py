@@ -1664,6 +1664,8 @@ class PostTab(ctk.CTkFrame):
         dialog = tk.Toplevel(self.master)
         dialog.title("Cắt video thành 2 phần")
         dialog.geometry("650x500")
+        dialog.transient(self.master)
+        dialog.grab_set()
 
         # Header
         tk.Label(dialog, text="Chọn folder chứa video MP4", font=("Arial", 12, "bold")).pack(pady=10)
@@ -1676,7 +1678,7 @@ class PostTab(ctk.CTkFrame):
         folder_entry.pack(side=tk.LEFT, padx=5)
 
         def browse():
-            folder = filedialog.askdirectory()
+            folder = filedialog.askdirectory(parent=dialog, title="Chọn folder chứa video MP4")
             if folder:
                 folder_entry.delete(0, tk.END)
                 folder_entry.insert(0, folder)
