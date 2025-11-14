@@ -1811,14 +1811,21 @@ class PostTab(ctk.CTkFrame):
             # Cắt từng phần
             for i in range(1, num_parts + 1):
                 start = (i - 1) * part_dur
-                end = i * part_dur if i < num_parts else dur  # Part cuối lấy hết
-
                 part_file = os.path.join(outdir, f"{name}-part{i}.mp4")
                 log(f"  - Đang tạo Part{i}...")
 
+                # Build ffmpeg command
+                cmd = ["ffmpeg", "-y", "-ss", str(start), "-i", src]
+
+                # Part cuối: Lấy hết (không dùng -t)
+                # Part khác: Dùng -t (duration) để đều nhau
+                if i < num_parts:
+                    cmd.extend(["-t", str(part_dur)])
+
+                cmd.extend(["-c", "copy", "-avoid_negative_ts", "1", part_file])
+
                 r = subprocess.run(
-                    ["ffmpeg", "-y", "-ss", str(start), "-i", src, "-to", str(end),
-                     "-c", "copy", "-avoid_negative_ts", "1", part_file],
+                    cmd,
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True
