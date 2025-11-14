@@ -1669,14 +1669,14 @@ class PostTab(ctk.CTkFrame):
         # Create dialog
         dialog = ctk.CTkToplevel(self.master)
         dialog.title("✂️ Cắt video thành 2 phần")
-        dialog.geometry("600x400")
+        dialog.geometry("700x550")
         dialog.transient(self.master)
         dialog.grab_set()
 
         # Center dialog
         dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (600 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (400 // 2)
+        x = (dialog.winfo_screenwidth() // 2) - (700 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (550 // 2)
         dialog.geometry(f"+{x}+{y}")
 
         # Header
@@ -1711,7 +1711,7 @@ class PostTab(ctk.CTkFrame):
         log_label = ctk.CTkLabel(dialog, text="Log:", font=(FONTS["family"], 12, "bold"))
         log_label.pack(pady=(15, 5))
 
-        log_text = tk.Text(dialog, height=12, width=70, font=("Consolas", 9), bg="#2b2b2b", fg="white")
+        log_text = tk.Text(dialog, height=10, width=75, font=("Consolas", 9), bg="#2b2b2b", fg="white")
         log_text.pack(padx=20, pady=5)
 
         def log(msg):
