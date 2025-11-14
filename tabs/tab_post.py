@@ -1652,15 +1652,25 @@ class PostTab(ctk.CTkFrame):
 
     def split_video_dialog(self):
         """Dialog cắt video thành 2 phần (không re-encode) - STANDALONE SIMPLE"""
-        # Check ffmpeg
+        # Check ffmpeg - with stdin=DEVNULL to prevent hang
         missing = []
         try:
-            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, timeout=5)
+            subprocess.run(
+                ["ffmpeg", "-version"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=10
+            )
         except Exception as e:
             missing.append(f"ffmpeg: {e}")
 
         try:
-            subprocess.run(["ffprobe", "-version"], capture_output=True, check=True, timeout=5)
+            subprocess.run(
+                ["ffprobe", "-version"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=10
+            )
         except Exception as e:
             missing.append(f"ffprobe: {e}")
 
@@ -1708,7 +1718,10 @@ class PostTab(ctk.CTkFrame):
             try:
                 r = subprocess.run(
                     ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", src],
-                    capture_output=True, text=True, timeout=30
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
                 )
                 if r.returncode == 0:
                     return float(json.loads(r.stdout)["format"]["duration"])
@@ -1730,6 +1743,7 @@ class PostTab(ctk.CTkFrame):
             log("  - Đang tạo Part1...")
             r1 = subprocess.run(
                 ["ffmpeg", "-y", "-ss", "0", "-i", src, "-to", str(mid), "-c", "copy", "-avoid_negative_ts", "1", p1],
+                stdin=subprocess.DEVNULL,
                 capture_output=True
             )
             if r1.returncode != 0 or not os.path.exists(p1) or os.path.getsize(p1) == 0:
@@ -1739,6 +1753,7 @@ class PostTab(ctk.CTkFrame):
             log("  - Đang tạo Part2...")
             r2 = subprocess.run(
                 ["ffmpeg", "-y", "-ss", str(mid), "-i", src, "-c", "copy", "-avoid_negative_ts", "1", p2],
+                stdin=subprocess.DEVNULL,
                 capture_output=True
             )
             if r2.returncode != 0 or not os.path.exists(p2) or os.path.getsize(p2) == 0:
