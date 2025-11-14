@@ -1714,6 +1714,16 @@ class PostTab(ctk.CTkFrame):
         def log(msg):
             dialog.after(0, lambda: log_text.insert(tk.END, msg + "\n") or log_text.see(tk.END))
 
+        def clean_filename(filename):
+            """Loại bỏ ký tự đặc biệt khỏi tên file"""
+            # Loại bỏ: " ? \ / : * < > |
+            invalid_chars = '<>:"/\\|?*'
+            for char in invalid_chars:
+                filename = filename.replace(char, '')
+            # Loại bỏ khoảng trắng thừa
+            filename = ' '.join(filename.split())
+            return filename.strip()
+
         def get_duration(src):
             try:
                 r = subprocess.run(
@@ -1735,32 +1745,47 @@ class PostTab(ctk.CTkFrame):
                 log("  X Không đọc được thời lượng")
                 return False
 
-            mid = dur / 2
+            # Tính số phần dựa trên thời lượng (đơn vị: giây)
+            dur_min = dur / 60  # Chuyển sang phút
+            if dur_min < 39:
+                num_parts = 2
+            elif dur_min < 58:
+                num_parts = 3
+            elif dur_min < 78:
+                num_parts = 4
+            else:
+                num_parts = 5
+
+            # Clean filename
             name = os.path.splitext(os.path.basename(src))[0]
-            p1 = os.path.join(outdir, f"{name}-part1.mp4")
-            p2 = os.path.join(outdir, f"{name}-part2.mp4")
+            name = clean_filename(name)
 
-            log("  - Đang tạo Part1...")
-            r1 = subprocess.run(
-                ["ffmpeg", "-y", "-ss", "0", "-i", src, "-to", str(mid), "-c", "copy", "-avoid_negative_ts", "1", p1],
-                stdin=subprocess.DEVNULL,
-                capture_output=True
-            )
-            if r1.returncode != 0 or not os.path.exists(p1) or os.path.getsize(p1) == 0:
-                log("  X Part1 thất bại")
-                return False
+            log(f"  i Thời lượng: {dur_min:.1f} phút -> Cắt {num_parts} phần")
 
-            log("  - Đang tạo Part2...")
-            r2 = subprocess.run(
-                ["ffmpeg", "-y", "-ss", str(mid), "-i", src, "-c", "copy", "-avoid_negative_ts", "1", p2],
-                stdin=subprocess.DEVNULL,
-                capture_output=True
-            )
-            if r2.returncode != 0 or not os.path.exists(p2) or os.path.getsize(p2) == 0:
-                log("  X Part2 thất bại")
-                return False
+            # Tính thời lượng mỗi phần
+            part_dur = dur / num_parts
 
-            log(f"  OK: {os.path.basename(p1)} + {os.path.basename(p2)}\n")
+            # Cắt từng phần
+            for i in range(1, num_parts + 1):
+                start = (i - 1) * part_dur
+                end = i * part_dur if i < num_parts else dur  # Part cuối lấy hết
+
+                part_file = os.path.join(outdir, f"{name}-part{i}.mp4")
+                log(f"  - Đang tạo Part{i}...")
+
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-ss", str(start), "-i", src, "-to", str(end),
+                     "-c", "copy", "-avoid_negative_ts", "1", part_file],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True
+                )
+
+                if r.returncode != 0 or not os.path.exists(part_file) or os.path.getsize(part_file) == 0:
+                    log(f"  X Part{i} thất bại")
+                    return False
+
+            parts_list = ", ".join([f"{name}-part{i}.mp4" for i in range(1, num_parts + 1)])
+            log(f"  OK: {parts_list}\n")
             return True
 
         def run():
