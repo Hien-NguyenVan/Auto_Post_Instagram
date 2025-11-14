@@ -660,55 +660,7 @@ class PostScheduler(threading.Thread):
             post.log(f"✅ Đã gửi file thành công")
             time.sleep(WAIT_MEDIUM)
 
-            # ========== RESET VM TRƯỚC KHI MỞ INSTAGRAM ==========
-            # Reboot VM để đảm bảo trạng thái sạch trước khi mở Instagram
-            post.log(f"🔄 Đang reset máy ảo để đảm bảo trạng thái sạch...")
-            try:
-                subprocess.run(
-                    [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                post.log(f"✅ Đã gửi lệnh reboot VM")
-            except Exception as e:
-                post.log(f"⚠️ Lỗi khi reboot VM: {e}")
-
-            # Wait for VM to be fully ready after reboot
-            post.log(f"⏳ Chờ máy ảo khởi động lại...")
-            if not vm_manager.wait_vm_ready(post.vm_name, LDCONSOLE_EXE, timeout=120, log_callback=post.log):
-                post.log(f"⏱️ Timeout - Máy ảo '{post.vm_name}' không khởi động lại được")
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                time.sleep(WAIT_EXTRA_LONG)
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            # Wait for ADB to reconnect after reboot
-            post.log(f"⏳ Chờ ADB kết nối lại...")
-            if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=post.log):
-                post.log(f"⏱️ Timeout - ADB không kết nối lại được đến '{adb_address}'")
-                post.log(f"🛑 Đang tắt máy ảo...")
-                subprocess.run(
-                    [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
-                time.sleep(WAIT_EXTRA_LONG)
-                post.status = "failed"
-                self.ui_queue.put(("status_update", post.id, "failed"))
-                self.running_posts.discard(post.id)
-                save_scheduled_posts(self.posts)
-                return
-
-            post.log(f"✅ Máy ảo đã reset và sẵn sàng")
-            time.sleep(WAIT_MEDIUM)
-
-            # Check stop request after VM reset
+            # Check stop request after sending file
             if post.stop_requested:
                 post.log(f"🛑 Đã dừng theo yêu cầu - Đang tắt máy ảo...")
                 subprocess.run(
