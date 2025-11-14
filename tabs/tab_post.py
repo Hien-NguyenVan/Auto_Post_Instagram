@@ -1738,14 +1738,28 @@ class PostTab(ctk.CTkFrame):
                 )
                 if r.returncode == 0:
                     return float(json.loads(r.stdout)["format"]["duration"])
-            except:
-                pass
-            return None
+                else:
+                    log(f"  ! ffprobe returncode: {r.returncode}")
+                    if r.stderr:
+                        log(f"  ! ffprobe stderr: {r.stderr[:200]}")
+                    return None
+            except Exception as e:
+                log(f"  ! ffprobe exception: {type(e).__name__}: {e}")
+                return None
 
         def split_one(src, outdir):
+            # Log tên file gốc
+            original_name = os.path.basename(src)
+            log(f"  > File gốc: {original_name}")
+
+            # Check file tồn tại
+            if not os.path.exists(src):
+                log(f"  X File không tồn tại: {src}")
+                return False
+
             dur = get_duration(src)
             if not dur:
-                log("  X Không đọc được thời lượng")
+                log("  X Không đọc được thời lượng - Xem log phía trên để biết lỗi")
                 return False
 
             # Tính số phần dựa trên thời lượng (đơn vị: giây)
@@ -1761,7 +1775,10 @@ class PostTab(ctk.CTkFrame):
 
             # Clean filename
             name = os.path.splitext(os.path.basename(src))[0]
-            name = clean_filename(name)
+            name_cleaned = clean_filename(name)
+            if name != name_cleaned:
+                log(f"  > Tên sau clean: {name_cleaned}")
+            name = name_cleaned
 
             log(f"  i Thời lượng: {dur_min:.1f} phút -> Cắt {num_parts} phần")
 
@@ -1780,11 +1797,22 @@ class PostTab(ctk.CTkFrame):
                     ["ffmpeg", "-y", "-ss", str(start), "-i", src, "-to", str(end),
                      "-c", "copy", "-avoid_negative_ts", "1", part_file],
                     stdin=subprocess.DEVNULL,
-                    capture_output=True
+                    capture_output=True,
+                    text=True
                 )
 
-                if r.returncode != 0 or not os.path.exists(part_file) or os.path.getsize(part_file) == 0:
-                    log(f"  X Part{i} thất bại")
+                if r.returncode != 0:
+                    log(f"  X Part{i} thất bại - ffmpeg returncode: {r.returncode}")
+                    if r.stderr:
+                        log(f"  ! ffmpeg stderr: {r.stderr[-300:]}")  # 300 ký tự cuối
+                    return False
+
+                if not os.path.exists(part_file):
+                    log(f"  X Part{i} thất bại - File không tồn tại: {part_file}")
+                    return False
+
+                if os.path.getsize(part_file) == 0:
+                    log(f"  X Part{i} thất bại - File size = 0")
                     return False
 
             parts_list = ", ".join([f"{name}-part{i}.mp4" for i in range(1, num_parts + 1)])
