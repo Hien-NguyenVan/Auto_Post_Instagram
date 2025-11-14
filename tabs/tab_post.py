@@ -1653,11 +1653,22 @@ class PostTab(ctk.CTkFrame):
     def split_video_dialog(self):
         """Dialog cắt video thành 2 phần (không re-encode) - STANDALONE SIMPLE"""
         # Check ffmpeg
+        missing = []
         try:
             subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, timeout=5)
+        except Exception as e:
+            missing.append(f"ffmpeg: {e}")
+
+        try:
             subprocess.run(["ffprobe", "-version"], capture_output=True, check=True, timeout=5)
-        except:
-            messagebox.showerror("Lỗi", "Không tìm thấy ffmpeg/ffprobe!\nVui lòng cài đặt ffmpeg.")
+        except Exception as e:
+            missing.append(f"ffprobe: {e}")
+
+        if missing:
+            messagebox.showerror(
+                "Lỗi",
+                "Không tìm thấy:\n\n" + "\n".join(missing) + "\n\nVui lòng thêm ffmpeg vào PATH và RESTART app!"
+            )
             return
 
         # Simple Toplevel window
