@@ -234,27 +234,76 @@ class ScheduledPost:
 
 # ==================== DATA PERSISTENCE ====================
 def load_scheduled_posts():
-    """Load scheduled posts from JSON"""
+    """Load scheduled posts from JSON - Safe version with backup on error"""
     if not os.path.exists(SCHEDULED_POSTS_FILE):
+        logging.info("No scheduled_posts.json found, starting with empty list")
         return []
 
     try:
         with open(SCHEDULED_POSTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [ScheduledPost.from_dict(p) for p in data.get("posts", [])]
+        posts = [ScheduledPost.from_dict(p) for p in data.get("posts", [])]
+        logging.info(f"✅ Loaded {len(posts)} scheduled posts from JSON")
+        return posts
     except Exception as e:
-        logging.error(f"Error loading scheduled posts: {e}")
-        return []
+        logging.error(f"❌ CRITICAL: Error loading scheduled posts: {e}")
+        logging.error(f"   File: {SCHEDULED_POSTS_FILE}")
+        logging.error(f"   Exception type: {type(e).__name__}")
+        import traceback
+        logging.error(f"   Traceback:\n{traceback.format_exc()}")
+
+        # ⚠️ Backup file cũ để tránh mất data
+        backup_file = SCHEDULED_POSTS_FILE + ".backup_error"
+        try:
+            import shutil
+            shutil.copy2(SCHEDULED_POSTS_FILE, backup_file)
+            logging.error(f"   📁 File đã được backup tại: {backup_file}")
+            logging.error(f"   ⚠️ KHÔNG TẢI ĐƯỢC DATA! Vui lòng kiểm tra file backup!")
+        except:
+            pass
+
+        # Return empty list NHƯNG không cho phép save (sẽ check trong __init__)
+        # Raise exception để user biết có vấn đề
+        raise RuntimeError(
+            f"❌ Cannot load scheduled_posts.json!\n"
+            f"📁 Backup saved at: {backup_file}\n"
+            f"Error: {e}\n"
+            f"⚠️ App cannot start to prevent data loss!"
+        )
 
 
 def save_scheduled_posts(posts):
-    """Save scheduled posts to JSON"""
+    """Save scheduled posts to JSON - Safe version with backup"""
+    # ⚠️ SAFETY CHECK: Không save nếu posts rỗng và file cũ có data!
+    if not posts and os.path.exists(SCHEDULED_POSTS_FILE):
+        try:
+            with open(SCHEDULED_POSTS_FILE, "r", encoding="utf-8") as f:
+                old_data = json.load(f)
+            old_count = len(old_data.get("posts", []))
+
+            if old_count > 0:
+                logging.warning(f"⚠️ PREVENTED DATA LOSS: Refusing to save empty list when {old_count} posts exist!")
+                logging.warning(f"   If you really want to clear all posts, delete the file manually.")
+                return
+        except:
+            pass  # Nếu file cũ corrupt, cho phép save
+
     try:
+        # Backup file cũ trước khi save
+        if os.path.exists(SCHEDULED_POSTS_FILE):
+            backup_file = SCHEDULED_POSTS_FILE + ".backup"
+            import shutil
+            shutil.copy2(SCHEDULED_POSTS_FILE, backup_file)
+
+        # Save new data
         data = {"posts": [p.to_dict() for p in posts]}
         with open(SCHEDULED_POSTS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"💾 Saved {len(posts)} posts to JSON")
     except Exception as e:
-        logging.error(f"Error saving scheduled posts: {e}")
+        logging.error(f"❌ Error saving scheduled posts: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
 
 
 def get_vm_list_with_insta():
@@ -934,7 +983,22 @@ class PostTab(ctk.CTkFrame):
         super().__init__(parent, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.logger = logging.getLogger(__name__)
         self.ui_queue = queue.Queue()
-        self.posts = load_scheduled_posts()
+
+        # ⚠️ SAFE LOAD: Load posts with error handling to prevent data loss
+        try:
+            self.posts = load_scheduled_posts()
+        except RuntimeError as e:
+            # Critical error loading data - show error to user
+            self.logger.error(f"Failed to load scheduled posts: {e}")
+            messagebox.showerror(
+                "Lỗi tải dữ liệu",
+                f"❌ Không thể tải file scheduled_posts.json!\n\n"
+                f"{str(e)}\n\n"
+                f"App sẽ khởi động với danh sách rỗng.\n"
+                f"Vui lòng kiểm tra file backup để khôi phục dữ liệu."
+            )
+            self.posts = []
+
         self.scheduler = None
         self.log_windows = {}
         self.checked_posts = {}  # Dictionary để lưu trạng thái checkbox {post_id: True/False}
@@ -956,8 +1020,10 @@ class PostTab(ctk.CTkFrame):
                 self.logger.info(f"Reset post {post.id} to paused state after app restart")
             post.log_callback = self.append_log_line
 
-        # Save lại state đã reset
-        save_scheduled_posts(self.posts)
+        # ⚠️ SAFE SAVE: Chỉ save nếu có data (tránh save empty list)
+        # save_scheduled_posts() đã có safety check bên trong
+        if self.posts:
+            save_scheduled_posts(self.posts)
 
         self.build_ui()
         self.load_posts_to_table(auto_sort=True)  # ✅ Sort lần đầu khi load app
