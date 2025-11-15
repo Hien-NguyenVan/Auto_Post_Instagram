@@ -26,7 +26,7 @@ import customtkinter as ctk
 from ui_theme import *
 import traceback
 import sys
-from utils.download_dlp import download_video_api, download_tiktok_direct_url
+from utils.download_dlp import download_video_api
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
@@ -35,11 +35,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from config import LDCONSOLE_EXE, ADB_EXE
 from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG, TIMEOUT_DEFAULT, TIMEOUT_MINUTE
 from utils.api_manager_multi import multi_api_manager
-from utils.tiktok_api_new import (
-    extract_tiktok_handle,
-    fetch_tiktok_videos,
+from utils.tiktok_api_rapidapi import (
+    extract_tiktok_username,
+    get_tiktok_secuid,
+    fetch_tiktok_videos_latest,
     filter_videos_newer_than,
     convert_to_output_format,
+    download_tiktok_video,
     check_tiktok_api_key_valid
 )
 from utils.yt_api import check_api_key_valid
@@ -154,7 +156,6 @@ from utils.yt_api import (
     check_api_key_valid
 )
 
-from utils.tiktok_api import fetch_tiktok_videos_newer_than
 
 def get_vm_list_with_insta():
     """Lấy danh sách máy ảo kèm tên Instagram từ data/"""
@@ -410,13 +411,20 @@ class Stream:
                             if self.stop_event.is_set():
                                 break
                             try:
-                                handle = extract_tiktok_handle(ch_url)
-                                self.log(f"[TikTok] Đang quét @{handle}...")
+                                # Extract username from URL
+                                username = extract_tiktok_username(ch_url)
+                                self.log(f"[TikTok] Đang quét @{username}...")
 
-                                # Fetch all videos from TikTok
-                                all_videos = fetch_tiktok_videos(handle, tiktok_key, self.log)
+                                # Step 1: Get secUid
+                                secuid = get_tiktok_secuid(username, tiktok_key, log_callback=self.log)
+                                if not secuid:
+                                    self.log(f"[TikTok] Không tìm thấy kênh @{username}")
+                                    continue
 
-                                # Filter videos newer than cutoff_dt
+                                # Step 2: Fetch latest 35 videos from TikTok
+                                all_videos = fetch_tiktok_videos_latest(secuid, username, tiktok_key, log_callback=self.log)
+
+                                # Step 3: Filter videos newer than cutoff_dt
                                 filtered = filter_videos_newer_than(all_videos, cutoff_dt, self.log)
 
                                 if filtered:
@@ -558,18 +566,39 @@ class Stream:
 
                             # Chọn download function dựa vào platform
                             platform = self.cfg.get("platform", "youtube")
-                            if platform == "tiktok":
-                                download_func = download_tiktok_direct_url
-                            else:
-                                download_func = download_video_api
 
-                            success, video_path, reason = self.worker_helper.run_blocking_func(
-                                download_func,
-                                url,
-                                log_callback=lambda msg: self.log(msg),
-                                timeout=600,  # 10 phút
-                                check_interval=2
-                            )
+                            if platform == "tiktok":
+                                # Get TikTok API key for download
+                                tiktok_key = multi_api_manager.get_next_tiktok_key()
+                                if not tiktok_key:
+                                    self.log(f"❌ Không có TikTok API key để tải video")
+                                    self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                    self.worker_helper.run_subprocess(
+                                        [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                        timeout=30
+                                    )
+                                    vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
+                                    continue
+
+                                # Download TikTok video using RapidAPI
+                                success, video_path, reason = self.worker_helper.run_blocking_func(
+                                    download_tiktok_video,
+                                    url,
+                                    tiktok_key,
+                                    log_callback=lambda msg: self.log(msg),
+                                    timeout=600,  # 10 phút
+                                    check_interval=2
+                                )
+                            else:
+                                # Download YouTube video
+                                success, video_path, reason = self.worker_helper.run_blocking_func(
+                                    download_video_api,
+                                    url,
+                                    log_callback=lambda msg: self.log(msg),
+                                    timeout=600,  # 10 phút
+                                    check_interval=2
+                                )
 
                             if not success:
                                 if reason == "stopped":

@@ -28,7 +28,7 @@ from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
-from utils.download_dlp import download_video_api, download_tiktok_direct_url
+from utils.download_dlp import download_video_api
 from utils.api_manager_multi import multi_api_manager
 from utils.yt_api import (
     check_api_key_valid,
@@ -39,13 +39,15 @@ from utils.yt_api import (
     filter_videos_by_mode,
     iso_to_datetime
 )
-from utils.tiktok_api_new import (
+from utils.tiktok_api_rapidapi import (
     check_tiktok_api_key_valid,
-    extract_tiktok_handle,
-    fetch_tiktok_videos,
+    extract_tiktok_username,
+    get_tiktok_secuid,
+    fetch_tiktok_videos_with_count,
+    get_video_download_link,
+    download_tiktok_video,
     convert_to_output_format
 )
-from utils.download_dlp import download_tiktok_direct_url, download_video_api
 
 
 # ==================== CONSTANTS ====================
@@ -595,11 +597,30 @@ class PostScheduler(threading.Thread):
                             # Default: TikTok (hoặc bất kỳ URL nào không phải YouTube)
                             post.log(f"📥 Đang tải video TikTok từ URL...")
                             try:
-                                video_path = download_tiktok_direct_url(
+                                # Get TikTok API key
+                                tiktok_key = multi_api_manager.get_next_tiktok_key()
+                                if not tiktok_key:
+                                    post.log(f"❌ Không có TikTok API key")
+                                    post.status = "failed"
+                                    self.ui_queue.put(("status_update", post.id, "failed"))
+                                    self.running_posts.discard(post.id)
+                                    save_scheduled_posts(self.posts)
+                                    # Cleanup VM
+                                    subprocess.run(
+                                        [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                                        creationflags=subprocess.CREATE_NO_WINDOW
+                                    )
+                                    vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                                    time.sleep(WAIT_EXTRA_LONG)
+                                    raise Exception("Attempt failed")
+
+                                # Download TikTok video using RapidAPI
+                                video_path = download_tiktok_video(
                                     original_video_path,
+                                    tiktok_key,
                                     log_callback=lambda msg: post.log(msg)
                                 )
-        
+
                                 if not video_path or not os.path.exists(video_path):
                                     post.log(f"❌ Không thể tải video TikTok")
                                     post.status = "failed"
@@ -614,11 +635,11 @@ class PostScheduler(threading.Thread):
                                     vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
                                     time.sleep(WAIT_EXTRA_LONG)
                                     raise Exception("Attempt failed")
-        
+
                                 post.log(f"✅ Đã tải video TikTok: {os.path.basename(video_path)}")
                                 temp_video_path = video_path  # Mark for cleanup later
                                 post.video_path = video_path  # Update to local path
-        
+
                             except Exception as e:
                                 post.log(f"❌ Lỗi khi tải video TikTok: {e}")
                                 post.status = "failed"
@@ -923,6 +944,8 @@ class PostTab(ctk.CTkFrame):
         self.is_running_all = False  # Flag để track trạng thái "Chạy tất cả"
         self.control_buttons = []  # List các buttons cần disable khi đang chạy
         self.displayed_posts = []  # Thứ tự posts đang hiển thị trên UI (sau khi sort)
+        self.view_mode = "flat"  # View mode: "flat" hoặc "grouped" (grouped by VM)
+        self.expanded_vms = set()  # Track which VM groups are expanded
 
         # ✅ FIX BUG #1: Reset state khi load app
         # Khi app restart, force pause tất cả posts để tránh tự động chạy
@@ -1142,6 +1165,37 @@ class PostTab(ctk.CTkFrame):
         )
         self.count_label.pack(side=tk.RIGHT, padx=DIMENSIONS["spacing_md"])
 
+        # ====== VIEW MODE TOGGLE ======
+        view_mode_bar = ctk.CTkFrame(self, fg_color="transparent")
+        view_mode_bar.pack(fill=tk.X, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_sm"], 0))
+
+        ctk.CTkLabel(
+            view_mode_bar,
+            text="👁️ Chế độ xem:",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(side=tk.LEFT, padx=(0, DIMENSIONS["spacing_md"]))
+
+        # Flat view button
+        self.flat_view_btn = ctk.CTkButton(
+            view_mode_bar,
+            text="📋 Danh sách phẳng",
+            command=lambda: self.switch_view_mode("flat"),
+            **get_button_style("primary"),
+            width=150
+        )
+        self.flat_view_btn.pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"])
+
+        # Grouped view button
+        self.grouped_view_btn = ctk.CTkButton(
+            view_mode_bar,
+            text="📂 Nhóm theo máy ảo",
+            command=lambda: self.switch_view_mode("grouped"),
+            **get_button_style("secondary"),
+            width=170
+        )
+        self.grouped_view_btn.pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"])
+
         # ====== TABLE CONTAINER ======
         table_outer = ctk.CTkFrame(self, fg_color="transparent")
         table_outer.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_sm"], DIMENSIONS["spacing_md"]))
@@ -1195,6 +1249,7 @@ class PostTab(ctk.CTkFrame):
         # Configure alternating row colors (striped)
         self.tree.tag_configure("oddrow", background=COLORS["surface_2"])
         self.tree.tag_configure("evenrow", background=COLORS["bg_secondary"])
+        self.tree.tag_configure("vm_group", background=COLORS["accent"], foreground="white", font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_bold"]))
 
         # Headers
         self.tree.heading("checkbox", text="☐", command=self.toggle_all_checkboxes)
@@ -1392,9 +1447,9 @@ class PostTab(ctk.CTkFrame):
                 count_frame.pack(padx=20, pady=5, fill="x")
                 filter_frame.pack(padx=20, pady=5, fill="x")
             else:
-                example_label.config(text="Ví dụ: https://www.tiktok.com/@tiin.vn")
-                count_frame.pack_forget()
-                filter_frame.pack_forget()
+                example_label.config(text="Ví dụ: https://www.tiktok.com/@theanh28entertainment")
+                count_frame.pack(padx=20, pady=5, fill="x")  # TikTok cũng có số lượng video
+                filter_frame.pack_forget()  # TikTok không có filter duration
 
         platform_var.trace_add("write", on_platform_change)
         on_platform_change()  # Initial update
@@ -1541,51 +1596,68 @@ class PostTab(ctk.CTkFrame):
                         )
                         return
 
-                    # Extract handle
-                    handle = extract_tiktok_handle(url)
-                    status_label.config(text=f"⏳ Đang quét kênh @{handle}...", foreground="blue")
+                    # Get video count
+                    try:
+                        video_count = int(entry_count.get())
+                        if video_count < 1:
+                            raise ValueError
+                    except ValueError:
+                        messagebox.showerror("Lỗi", "Số lượng video phải >= 1", parent=dialog)
+                        return
+
+                    # Extract username
+                    username = extract_tiktok_username(url)
+                    status_label.config(text=f"⏳ Đang lấy thông tin kênh @{username}...", foreground="blue")
                     dialog.update()
 
-                    # Fetch videos from TikTok (get ALL videos, no time filter)
+                    # Log callback for status updates
                     def log_msg(msg):
                         status_label.config(text=msg)
                         dialog.update()
 
-                    all_videos = fetch_tiktok_videos(handle, tiktok_key, log_callback=log_msg)
+                    # Step 1: Get secUid
+                    secuid = get_tiktok_secuid(username, tiktok_key, log_callback=log_msg)
+
+                    if not secuid:
+                        status_label.config(text="❌ Không tìm thấy kênh TikTok", foreground="red")
+                        messagebox.showerror(
+                            "Lỗi",
+                            f"Không tìm thấy kênh TikTok @{username}\n\n"
+                            f"Vui lòng kiểm tra lại link kênh.",
+                            parent=dialog
+                        )
+                        return
+
+                    # Step 2: Fetch videos with count
+                    all_videos = fetch_tiktok_videos_with_count(
+                        secuid,
+                        video_count,
+                        username,
+                        tiktok_key,
+                        log_callback=log_msg
+                    )
 
                     if not all_videos:
                         status_label.config(text="❌ Không tìm thấy video nào", foreground="red")
                         messagebox.showwarning(
                             "Không có video",
-                            f"Không tìm thấy video nào từ kênh @{handle}",
-                            parent=dialog
-                        )
-                        return
-
-                    # Filter: only keep videos with valid URL (no time check)
-                    valid_videos = [v for v in all_videos if v.get("video_url")]
-
-                    if not valid_videos:
-                        status_label.config(text="❌ Không có video hợp lệ", foreground="red")
-                        messagebox.showwarning(
-                            "Không có video hợp lệ",
-                            f"Tìm thấy {len(all_videos)} video nhưng không có video nào có URL hợp lệ.",
+                            f"Không tìm thấy video nào từ kênh @{username}",
                             parent=dialog
                         )
                         return
 
                     # Convert to output format
-                    converted = convert_to_output_format(valid_videos)
+                    converted = convert_to_output_format(all_videos)
 
                     status_label.config(
-                        text=f"✅ Tìm thấy {len(converted)} video hợp lệ",
+                        text=f"✅ Đã lấy {len(converted)} video từ @{username}",
                         foreground="green"
                     )
 
                     result["ok"] = True
                     result["videos"] = converted
                     result["platform"] = "tiktok"
-                    result["channel_name"] = handle
+                    result["channel_name"] = username
 
                 # Wait a bit before closing
                 dialog.after(1000, dialog.destroy)
@@ -2744,7 +2816,38 @@ class PostTab(ctk.CTkFrame):
         # ✅ Lưu thứ tự hiển thị để bulk operations sử dụng
         self.displayed_posts = sorted_posts
 
-        # Add to table
+        # ========== RENDER TABLE ==========
+        if self.view_mode == "grouped":
+            # GROUPED VIEW: Group by VM
+            self._render_grouped_view(sorted_posts)
+        else:
+            # FLAT VIEW: Default list view
+            self._render_flat_view(sorted_posts)
+
+        # Cập nhật icon header checkbox dựa trên trạng thái hiện tại
+        if self.posts:
+            checked_count = sum(1 for post in self.posts if self.checked_posts.get(post.id, False))
+            if checked_count == len(self.posts):
+                self.tree.heading("checkbox", text="☑", command=self.toggle_all_checkboxes)
+            else:
+                self.tree.heading("checkbox", text="☐", command=self.toggle_all_checkboxes)
+
+        # Cập nhật label đếm số lượng video
+        total = len(self.posts)
+        draft = sum(1 for p in self.posts if p.status == "draft")
+        pending_paused = sum(1 for p in self.posts if p.status == "pending" and p.is_paused)
+        pending_running = sum(1 for p in self.posts if p.status == "pending" and not p.is_paused)
+        processing = sum(1 for p in self.posts if p.status == "processing")
+        posted = sum(1 for p in self.posts if p.status == "posted")
+        failed = sum(1 for p in self.posts if p.status == "failed")
+
+        self.count_label.configure(
+            text=f"📊 Tổng: {total} | ⚙️ Chưa cấu hình: {draft} | ⏸ Đã dừng: {pending_paused} | ⏳ Chờ đăng: {pending_running} | "
+                 f"🔄 Đang đăng: {processing} | ✅ Đã đăng: {posted} | ❌ Thất bại: {failed}"
+        )
+
+    def _render_flat_view(self, sorted_posts):
+        """Render flat view (default list)"""
         for idx, post in enumerate(sorted_posts, start=1):
             # ✅ Phân biệt trạng thái pending dựa vào is_paused
             if post.status == "pending":
@@ -2791,27 +2894,89 @@ class PostTab(ctk.CTkFrame):
                 tags=(tag,)
             )
 
-        # Cập nhật icon header checkbox dựa trên trạng thái hiện tại
-        if self.posts:
-            checked_count = sum(1 for post in self.posts if self.checked_posts.get(post.id, False))
-            if checked_count == len(self.posts):
-                self.tree.heading("checkbox", text="☑", command=self.toggle_all_checkboxes)
-            else:
-                self.tree.heading("checkbox", text="☐", command=self.toggle_all_checkboxes)
+    def _render_grouped_view(self, sorted_posts):
+        """Render grouped view (group by VM)"""
+        from collections import defaultdict
 
-        # Cập nhật label đếm số lượng video
-        total = len(self.posts)
-        draft = sum(1 for p in self.posts if p.status == "draft")
-        pending_paused = sum(1 for p in self.posts if p.status == "pending" and p.is_paused)
-        pending_running = sum(1 for p in self.posts if p.status == "pending" and not p.is_paused)
-        processing = sum(1 for p in self.posts if p.status == "processing")
-        posted = sum(1 for p in self.posts if p.status == "posted")
-        failed = sum(1 for p in self.posts if p.status == "failed")
+        # Group posts by VM
+        vm_groups = defaultdict(list)
+        for post in sorted_posts:
+            vm_name = post.vm_name if post.vm_name else "⚠️ Chưa đặt máy ảo"
+            vm_groups[vm_name].append(post)
 
-        self.count_label.configure(
-            text=f"📊 Tổng: {total} | ⚙️ Chưa cấu hình: {draft} | ⏸ Đã dừng: {pending_paused} | ⏳ Chờ đăng: {pending_running} | "
-                 f"🔄 Đang đăng: {processing} | ✅ Đã đăng: {posted} | ❌ Thất bại: {failed}"
+        # Sort VMs: Real VMs first, then "Chưa đặt máy ảo"
+        sorted_vms = sorted(
+            vm_groups.keys(),
+            key=lambda vm: (vm == "⚠️ Chưa đặt máy ảo", vm)
         )
+
+        global_idx = 1  # Global index across all groups
+        for vm_name in sorted_vms:
+            posts_in_vm = vm_groups[vm_name]
+            vm_display_name = f"📱 {vm_name}" if vm_name != "⚠️ Chưa đặt máy ảo" else vm_name
+
+            # Insert parent node (VM group)
+            parent_id = f"vm_group_{vm_name}"
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=parent_id,
+                values=(
+                    "",  # No checkbox for group
+                    "",  # No number for group
+                    f"{vm_display_name} ({len(posts_in_vm)} videos)",
+                    "", "", "", "", "", ""
+                ),
+                tags=("vm_group",),
+                open=vm_name in self.expanded_vms  # Expand if previously expanded
+            )
+
+            # Insert child nodes (posts)
+            for post in posts_in_vm:
+                # Status icon
+                if post.status == "pending":
+                    if post.is_paused:
+                        status_icon = "⏸ Đã dừng"
+                    else:
+                        status_icon = "⏳ Chờ đăng"
+                else:
+                    status_icon = {
+                        "draft": "⚙️ Chưa cấu hình",
+                        "processing": "🔄 Đang đăng",
+                        "posted": "✅ Đã đăng",
+                        "failed": "❌ Thất bại"
+                    }.get(post.status, post.status)
+
+                # Scheduled time display
+                if post.post_now:
+                    scheduled_time_display = "⚡ Đăng ngay"
+                elif post.scheduled_time_vn:
+                    scheduled_time_display = post.scheduled_time_vn.strftime("%d/%m/%Y %H:%M")
+                else:
+                    scheduled_time_display = "Chưa đặt"
+
+                # Checkbox status
+                checkbox_icon = "☑" if self.checked_posts.get(post.id, False) else "☐"
+
+                # Insert child
+                self.tree.insert(
+                    parent_id,  # Parent is VM group
+                    tk.END,
+                    iid=post.id,
+                    values=(
+                        checkbox_icon,
+                        global_idx,
+                        post.title,
+                        "⚙️",
+                        scheduled_time_display,
+                        post.account_display,
+                        status_icon,
+                        "📋",
+                        "✖"
+                    ),
+                    tags=("evenrow" if global_idx % 2 == 0 else "oddrow",)
+                )
+                global_idx += 1
 
     def on_tree_click(self, event):
         """Handle tree click"""
@@ -2823,6 +2988,20 @@ class PostTab(ctk.CTkFrame):
         col_id = self.tree.identify_column(event.x)
 
         if not row_id or not col_id:
+            return
+
+        # ✅ Handle VM group expand/collapse in grouped view
+        if self.view_mode == "grouped" and row_id.startswith("vm_group_"):
+            # Extract VM name from group ID
+            vm_name = row_id.replace("vm_group_", "")
+
+            # Toggle expand/collapse
+            if self.tree.item(row_id, "open"):
+                self.tree.item(row_id, open=False)
+                self.expanded_vms.discard(vm_name)
+            else:
+                self.tree.item(row_id, open=True)
+                self.expanded_vms.add(vm_name)
             return
 
         col = self.tree["columns"][int(col_id.strip("#")) - 1]
@@ -3030,6 +3209,28 @@ class PostTab(ctk.CTkFrame):
             self.sort_order_btn.configure(text="⬆️ Tăng dần")
 
         self.load_posts_to_table(auto_sort=True)  # ✅ Sort khi user đổi chiều
+
+    def switch_view_mode(self, mode):
+        """Chuyển đổi giữa flat view và grouped view
+
+        Args:
+            mode: "flat" hoặc "grouped"
+        """
+        if self.view_mode == mode:
+            return  # Đã ở mode này rồi
+
+        self.view_mode = mode
+
+        # Update button styles
+        if mode == "flat":
+            self.flat_view_btn.configure(**get_button_style("primary"))
+            self.grouped_view_btn.configure(**get_button_style("secondary"))
+        else:
+            self.flat_view_btn.configure(**get_button_style("secondary"))
+            self.grouped_view_btn.configure(**get_button_style("primary"))
+
+        # Reload table với mode mới
+        self.load_posts_to_table(auto_sort=False)
 
     def edit_post_config(self, post: ScheduledPost):
         """Edit post configuration (VM và thời gian)"""

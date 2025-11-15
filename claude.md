@@ -1,8 +1,8 @@
 # 📋 CLAUDE.MD - Tài liệu Tổng quan Project
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
-> **Cập nhật lần cuối:** 2025-11-14
-> **Phiên bản hiện tại:** v1.5.24
+> **Cập nhật lần cuối:** 2025-11-15
+> **Phiên bản hiện tại:** v1.5.26
 
 ---
 
@@ -336,7 +336,51 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.24 (2025-11-14) - Current Version
+### v1.5.26 (2025-11-15) - Current Version
+**✨ FEATURE: Thêm chế độ xem "Nhóm theo máy ảo" trong tab_post**
+- Thêm toggle view mode: **Danh sách phẳng** vs **Nhóm theo máy ảo**
+- **Grouped View:**
+  - Videos được nhóm theo VM (TreeView với parent/child nodes)
+  - Click vào VM group để expand/collapse
+  - Track expanded state tự động (giữ nguyên khi reload)
+  - Group "⚠️ Chưa đặt máy ảo" cho videos chưa assign VM
+- **UI/UX:**
+  - Toggle buttons: 📋 Danh sách phẳng | 📂 Nhóm theo máy ảo
+  - Styling đặc biệt cho VM groups (accent color, bold font)
+  - Global index (STT) giữ nguyên từ 1-N trong cả 2 modes
+- **Bulk Operations:**
+  - Hoạt động chính xác trong cả 2 modes
+  - Số thứ tự (1, 2, 3...) vẫn theo thứ tự toàn cục
+  - `self.displayed_posts` vẫn giữ flat order để bulk operations sử dụng
+- **Lợi ích:**
+  - Dễ quản lý videos theo từng máy ảo
+  - Nhanh chóng xem được VM nào có bao nhiêu videos
+  - Workflow linh hoạt: Chọn view mode phù hợp với task
+  - Không ảnh hưởng đến existing features (sort, filter, bulk operations)
+
+### v1.5.25 (2025-11-15)
+**🔄 MAJOR CHANGE: Thay đổi hoàn toàn cơ chế TikTok API**
+- Loại bỏ cơ chế TikTok cũ (yt-dlp scraping + DumplingAI API)
+- Chuyển sang RapidAPI (tiktok-api23.p.rapidapi.com)
+- **Tạo file mới:** `utils/tiktok_api_rapidapi.py` với đầy đủ functions
+- **Tab Post:**
+  - Thêm trường số lượng video cho TikTok (giống YouTube)
+  - Workflow: Extract username → Get secUid → Fetch N videos với pagination (cursor)
+  - Download: Gọi API lấy direct link → Download video
+  - Filter isPinnedItem = true (không lấy video ghim)
+- **Tab Follow:**
+  - Quét TikTok theo thời gian (chỉ lấy 35 videos mới nhất)
+  - Filter theo cutoff_time
+  - Download và đăng bài tự động
+- **Lợi ích:**
+  - API ổn định hơn (không bị TikTok chặn như yt-dlp)
+  - Pagination chính xác (lấy đúng số lượng video yêu cầu)
+  - Download nhanh hơn (direct link từ API)
+  - Hỗ trợ API key rotation
+- **Breaking change:** Cần TikTok API key từ RapidAPI (tiktok-api23)
+- **Deprecated files:** `utils/tiktok_api.py`, `utils/tiktok_api_new.py` (có thể xóa sau khi test)
+
+### v1.5.24 (2025-11-14)
 **🗑️ REMOVE FEATURE: Loại bỏ chức năng cắt video**
 - Xóa nút "✂️ Cắt video" khỏi UI (tab_post row 1)
 - Xóa toàn bộ function `split_video_dialog()` (272 dòng code)
