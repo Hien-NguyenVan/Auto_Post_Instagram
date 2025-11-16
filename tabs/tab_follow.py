@@ -1343,7 +1343,7 @@ class FollowTab(ctk.CTkFrame):
 
         win = tk.Toplevel(self)
         win.title("Sửa luồng" if editing else "Thêm luồng")
-        win.geometry("680x620")
+        win.geometry("680x700")
         win.grab_set()
 
         frm = tk.Frame(win)
