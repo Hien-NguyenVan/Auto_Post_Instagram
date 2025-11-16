@@ -48,6 +48,7 @@ from utils.tiktok_api_rapidapi import (
     download_tiktok_video,
     convert_to_output_format
 )
+from utils.text_utils import remove_keywords_from_text, parse_keywords_input
 
 
 # ==================== CONSTANTS ====================
@@ -1132,6 +1133,14 @@ class PostTab(ctk.CTkFrame):
             command=self.bulk_assign_vm,
             **get_button_style("success"),
             width=180
+        ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
+
+        ctk.CTkButton(
+            row2,
+            text="✏️ Chỉnh sửa tiêu đề",
+            command=self.bulk_edit_titles,
+            **get_button_style("secondary"),
+            width=160
         ).pack(side=tk.LEFT, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
         # ====== HÀNG 3: ĐIỀU KHIỂN & XUẤT DỮ LIỆU ======
@@ -2431,6 +2440,300 @@ class PostTab(ctk.CTkFrame):
                 f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
                 f"✔️ Đã áp dụng: {applied_count} video\n"
                 f"🖥️ Số máy ảo: {vm_count}"
+            )
+
+    def bulk_edit_titles(self):
+        """Loại bỏ từ khóa khỏi tiêu đề video hàng loạt (case-sensitive)"""
+        # Block khi đang chạy tất cả
+        if self.is_running_all:
+            messagebox.showwarning(
+                "Không thể thực hiện",
+                "⚠️ Đang ở chế độ 'Chạy tất cả'!\n\n"
+                "Vui lòng nhấn '⏸ Dừng tất cả' để chỉnh sửa tiêu đề."
+            )
+            return
+
+        # Kiểm tra có video không
+        if not self.posts:
+            messagebox.showinfo("Thông báo", "Không có video nào trong danh sách!")
+            return
+
+        # Dialog
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Chỉnh sửa tiêu đề hàng loạt")
+        dialog.geometry("700x700")
+        dialog.grab_set()
+        dialog.configure(fg_color=COLORS["bg_primary"])
+
+        # Info
+        ctk.CTkLabel(
+            dialog,
+            text="✏️ Loại bỏ từ khóa khỏi tiêu đề video",
+            font=(FONTS["family"], FONTS["size_large"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(pady=10)
+
+        ctk.CTkLabel(
+            dialog,
+            text="(Từ khóa phân biệt hoa thường - case sensitive)",
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
+        ).pack(pady=2)
+
+        # ========== PHẠM VI VIDEO ==========
+        range_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        range_frame.pack(fill="x", padx=20, pady=(10, 5))
+
+        ctk.CTkLabel(
+            range_frame,
+            text="📌 Phạm vi video áp dụng",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        # Row: Start and End index
+        index_row = ctk.CTkFrame(range_frame, fg_color="transparent")
+        index_row.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(index_row, text="Từ video thứ:", width=110, anchor="w").pack(side="left")
+        entry_start_index = ctk.CTkEntry(index_row, width=80)
+        entry_start_index.insert(0, "1")
+        entry_start_index.pack(side="left", padx=5)
+
+        ctk.CTkLabel(index_row, text="Đến video thứ:", width=110, anchor="w").pack(side="left", padx=(20, 0))
+        entry_end_index = ctk.CTkEntry(index_row, width=80)
+        entry_end_index.insert(0, str(len(self.posts)))
+        entry_end_index.pack(side="left", padx=5)
+
+        # Info label
+        info_label = ctk.CTkLabel(
+            range_frame,
+            text=f"💡 Tổng số video hiện tại: {len(self.posts)}",
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["accent"]
+        )
+        info_label.pack(anchor="w", padx=10, pady=(5, 10))
+
+        # ========== NHẬP TỪ KHÓA ==========
+        keyword_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        keyword_frame.pack(fill="x", padx=20, pady=5)
+
+        ctk.CTkLabel(
+            keyword_frame,
+            text="🔑 Từ khóa cần loại bỏ",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        ctk.CTkLabel(
+            keyword_frame,
+            text="Nhập các từ khóa, phân tách bằng dấu phẩy (,)",
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["text_secondary"]
+        ).pack(anchor="w", padx=10, pady=(0, 5))
+
+        # Keywords entry
+        keywords_entry = ctk.CTkEntry(
+            keyword_frame,
+            placeholder_text="Ví dụ: #tiktok, #Tiktok, _R, [18+]",
+            font=(FONTS["family"], FONTS["size_normal"])
+        )
+        keywords_entry.pack(fill="x", padx=10, pady=(0, 5))
+
+        # Example
+        ctk.CTkLabel(
+            keyword_frame,
+            text="💡 Phân biệt hoa thường: '#tiktok' khác '#Tiktok'",
+            font=(FONTS["family"], FONTS["size_small"]),
+            text_color=COLORS["warning"]
+        ).pack(anchor="w", padx=10, pady=(0, 10))
+
+        # ========== PREVIEW ==========
+        preview_frame = ctk.CTkFrame(dialog, fg_color=COLORS["bg_secondary"], corner_radius=DIMENSIONS["corner_radius_medium"])
+        preview_frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+        ctk.CTkLabel(
+            preview_frame,
+            text="👁️ Preview",
+            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+
+        # Preview text area
+        preview_text = ctk.CTkTextbox(
+            preview_frame,
+            height=150,
+            font=(FONTS["family"], FONTS["size_small"]),
+            fg_color=COLORS["bg_tertiary"]
+        )
+        preview_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        preview_text.insert("1.0", "Nhập từ khóa và nhấn 'Xem Preview' để kiểm tra trước khi áp dụng...")
+        preview_text.configure(state="disabled")
+
+        def show_preview():
+            """Hiển thị preview thay đổi"""
+            keywords_string = keywords_entry.get().strip()
+            if not keywords_string:
+                preview_text.configure(state="normal")
+                preview_text.delete("1.0", "end")
+                preview_text.insert("1.0", "⚠️ Vui lòng nhập từ khóa!")
+                preview_text.configure(state="disabled")
+                return
+
+            # Parse range
+            try:
+                start_idx = int(entry_start_index.get())
+                end_idx = int(entry_end_index.get())
+            except ValueError:
+                preview_text.configure(state="normal")
+                preview_text.delete("1.0", "end")
+                preview_text.insert("1.0", "❌ Chỉ số phạm vi không hợp lệ!")
+                preview_text.configure(state="disabled")
+                return
+
+            # Preview changes
+            preview_lines = []
+            changed_count = 0
+            total_in_range = 0
+
+            for idx, post in enumerate(self.displayed_posts, start=1):
+                if idx < start_idx or idx > end_idx:
+                    continue
+
+                total_in_range += 1
+                original_title = post.title
+                new_title = remove_keywords_from_text(original_title, keywords_string)
+
+                if new_title != original_title:
+                    changed_count += 1
+                    preview_lines.append(f"[{idx}] TRƯỚC: {original_title}")
+                    preview_lines.append(f"[{idx}] SAU:  {new_title}")
+                    preview_lines.append("")
+
+            # Display preview
+            preview_text.configure(state="normal")
+            preview_text.delete("1.0", "end")
+
+            if changed_count == 0:
+                preview_text.insert("1.0", f"ℹ️ Không tìm thấy từ khóa nào trong {total_in_range} video (phạm vi {start_idx}-{end_idx})\n\n"
+                                          f"Kiểm tra lại:\n"
+                                          f"- Từ khóa có đúng chính tả không?\n"
+                                          f"- Phân biệt hoa thường (case-sensitive)")
+            else:
+                summary = f"✅ Tìm thấy {changed_count}/{total_in_range} video có từ khóa\n\n"
+                preview_text.insert("1.0", summary + "\n".join(preview_lines[:50]))  # Limit 50 lines
+
+                if len(preview_lines) > 50:
+                    preview_text.insert("end", f"\n... (và {len(preview_lines) - 50} dòng nữa)")
+
+            preview_text.configure(state="disabled")
+
+        # Preview button
+        ctk.CTkButton(
+            preview_frame,
+            text="👁️ Xem Preview",
+            command=show_preview,
+            **get_button_style("primary"),
+            width=140
+        ).pack(anchor="w", padx=10, pady=(0, 10))
+
+        result = {"ok": False}
+
+        def on_apply():
+            """Áp dụng loại bỏ từ khóa"""
+            keywords_string = keywords_entry.get().strip()
+            if not keywords_string:
+                messagebox.showerror("Lỗi", "Vui lòng nhập từ khóa!", parent=dialog)
+                return
+
+            # Parse range
+            try:
+                start_idx = int(entry_start_index.get())
+                end_idx = int(entry_end_index.get())
+
+                if start_idx < 1:
+                    messagebox.showerror("Lỗi", "Chỉ số bắt đầu phải >= 1", parent=dialog)
+                    return
+
+                if end_idx < start_idx:
+                    messagebox.showerror("Lỗi", "Chỉ số kết thúc phải >= chỉ số bắt đầu", parent=dialog)
+                    return
+            except ValueError:
+                messagebox.showerror("Lỗi", "Chỉ số không hợp lệ", parent=dialog)
+                return
+
+            # Confirm
+            parsed_keywords = parse_keywords_input(keywords_string)
+            if not messagebox.askyesno(
+                "Xác nhận",
+                f"⚠️ Bạn có chắc muốn loại bỏ từ khóa khỏi tiêu đề video?\n\n"
+                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                f"🔑 Từ khóa: {len(parsed_keywords)} từ\n"
+                f"   {', '.join(parsed_keywords[:5])}{'...' if len(parsed_keywords) > 5 else ''}\n\n"
+                f"💡 Thay đổi này sẽ được lưu vĩnh viễn!",
+                parent=dialog
+            ):
+                return
+
+            # Apply changes
+            changed_count = 0
+            for idx, post in enumerate(self.displayed_posts, start=1):
+                if idx < start_idx or idx > end_idx:
+                    continue
+
+                original_title = post.title
+                new_title = remove_keywords_from_text(original_title, keywords_string)
+
+                if new_title != original_title:
+                    post.title = new_title
+                    changed_count += 1
+
+            result["ok"] = True
+            result["changed_count"] = changed_count
+            result["start_idx"] = start_idx
+            result["end_idx"] = min(end_idx, len(self.posts))
+            result["keywords"] = ", ".join(parsed_keywords)
+            dialog.destroy()
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(pady=20)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="✅ Xóa từ khóa",
+            command=on_apply,
+            **get_button_style("success"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="❌ Hủy",
+            command=dialog.destroy,
+            **get_button_style("secondary"),
+            width=140
+        ).pack(side=tk.LEFT, padx=5)
+
+        dialog.wait_window()
+
+        if result["ok"]:
+            # Update posts and save
+            self.posts[:] = self.displayed_posts
+            save_scheduled_posts(self.posts)
+            self.load_posts_to_table(auto_sort=False)
+
+            changed_count = result.get("changed_count", 0)
+            start_idx = result.get("start_idx", 1)
+            end_idx = result.get("end_idx", len(self.posts))
+            keywords = result.get("keywords", "")
+
+            messagebox.showinfo(
+                "Thành công",
+                f"✅ Đã chỉnh sửa tiêu đề thành công!\n\n"
+                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                f"✏️ Đã thay đổi: {changed_count} video\n"
+                f"🔑 Từ khóa đã xóa: {keywords}"
             )
 
     def export_to_csv(self):

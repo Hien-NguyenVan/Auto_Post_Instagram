@@ -31,6 +31,7 @@ from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
+from utils.text_utils import remove_keywords_from_text
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from config import LDCONSOLE_EXE, ADB_EXE
 from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG, TIMEOUT_DEFAULT, TIMEOUT_MINUTE
@@ -469,6 +470,15 @@ class Stream:
 
                         url = vid.get("url", "")
                         title = vid.get("title", "<3")
+
+                        # Apply remove keywords if configured
+                        remove_keywords = self.cfg.get("remove_keywords", "")
+                        if remove_keywords:
+                            original_title = title
+                            title = remove_keywords_from_text(title, remove_keywords)
+                            if title != original_title:
+                                self.log(f"✏️ Đã loại bỏ từ khóa khỏi title: {original_title} → {title}")
+
                         self.log(f"🎬 [Bắt đầu] Xử lý video: {title}")
 
                         # ========== ACQUIRE VM LOCK ==========
@@ -1300,9 +1310,10 @@ class FollowTab(ctk.CTkFrame):
             "channels": "",
             "mode": "both",
             "interval_min": 60,
-            "vm_name": "", 
-            "account_display": ""
-            
+            "vm_name": "",
+            "account_display": "",
+            "remove_keywords": ""  # Từ khóa loại bỏ khỏi title
+
         }
         editing = False
         if edit_iid:
@@ -1316,7 +1327,8 @@ class FollowTab(ctk.CTkFrame):
                 "mode": cfg["mode"],
                 "interval_min": cfg["interval_min"],
                 "vm_name": cfg.get("vm_name", ""),  # THÊM
-                "account_display": cfg.get("account_display", "")
+                "account_display": cfg.get("account_display", ""),
+                "remove_keywords": cfg.get("remove_keywords", "")  # Load từ khóa
             }
 
         win = tk.Toplevel(self)
@@ -1402,6 +1414,13 @@ class FollowTab(ctk.CTkFrame):
         spn_interval.insert(0, str(init["interval_min"]))
         spn_interval.pack(anchor="w", pady=4)
 
+        # Từ khóa loại bỏ
+        tk.Label(frm, text="Từ khóa loại bỏ khỏi tiêu đề (phân tách bằng dấu phẩy, phân biệt hoa thường):").pack(anchor="w", pady=(8, 0))
+        ent_keywords = ttk.Entry(frm)
+        ent_keywords.insert(0, init["remove_keywords"])
+        ent_keywords.pack(fill=tk.X, pady=4)
+        tk.Label(frm, text="Ví dụ: #tiktok, #Tiktok, _R, [18+]", font=("Segoe UI", 8), fg="gray").pack(anchor="w")
+
         btns = tk.Frame(frm)
         btns.pack(fill=tk.X, pady=8)
 
@@ -1455,13 +1474,14 @@ class FollowTab(ctk.CTkFrame):
                 "id": slug,
                 "name": name,
                 "vm_name": selected_vm_name,  # THÊM
-                "account_display": selected_display, 
+                "account_display": selected_display,
                 "start_vn": ent_start.get().strip(),
                 "platform": platform_var.get(),
                 "channels": channels,
                 "mode": mode,
                 "interval_min": iv,
-                "out_path": out_path
+                "out_path": out_path,
+                "remove_keywords": ent_keywords.get().strip()  # Lưu từ khóa
             }
 
             meta = load_streams_meta()
@@ -1486,7 +1506,8 @@ class FollowTab(ctk.CTkFrame):
                     "channels": channels,
                     "mode": mode,
                     "interval_min": iv,
-                    "out_path": old_out
+                    "out_path": old_out,
+                    "remove_keywords": ent_keywords.get().strip()  # Lưu từ khóa
                 }
 
                 # xóa dữ liệu cũ để không lẫn (và tạo file rỗng)

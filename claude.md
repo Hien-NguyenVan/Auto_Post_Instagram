@@ -1,8 +1,8 @@
 # 📋 CLAUDE.MD - Tài liệu Tổng quan Project
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
-> **Cập nhật lần cuối:** 2025-11-15
-> **Phiên bản hiện tại:** v1.5.26
+> **Cập nhật lần cuối:** 2025-11-16
+> **Phiên bản hiện tại:** v1.5.28
 
 ---
 
@@ -336,7 +336,54 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.26 (2025-11-15) - Current Version
+### v1.5.28 (2025-11-16) - Current Version
+**✨ FEATURE: Remove keywords from video titles (case-sensitive)**
+- **Tab Post - Bulk edit titles:**
+  - Thêm nút "✏️ Chỉnh sửa tiêu đề" trong hàng "Cấu hình hàng loạt"
+  - Dialog với phạm vi video, nhập từ khóa, và preview trước khi áp dụng
+  - Loại bỏ từ khóa case-sensitive: `#tiktok` ≠ `#Tiktok`
+  - Preview hiển thị TRƯỚC/SAU cho từng video bị ảnh hưởng
+  - Lưu vĩnh viễn vào `scheduled_posts.json`
+- **Tab Follow - Auto-remove keywords:**
+  - Thêm field "Từ khóa loại bỏ" trong dialog tạo/sửa luồng
+  - Keywords được lưu vào stream config
+  - Tự động apply khi fetch videos từ YouTube/TikTok
+  - Log thay đổi realtime: `✏️ Đã loại bỏ từ khóa khỏi title: ... → ...`
+- **Helper utilities:**
+  - Tạo `utils/text_utils.py` với functions:
+    - `remove_keywords_from_text()`: Xóa keywords case-sensitive
+    - `parse_keywords_input()`: Parse chuỗi từ khóa
+    - Auto clean multiple spaces sau khi xóa
+- **Use cases:**
+  - Xóa hashtags không cần thiết: `#tiktok, #viral, #fyp`
+  - Xóa watermark text: `_R, [18+], REUP`
+  - Clean titles trước khi đăng lên Instagram
+- **Lợi ích:**
+  - Titles sạch hơn, professional hơn
+  - Bulk edit nhanh cho nhiều videos
+  - Auto-apply cho luồng tự động (tab_follow)
+  - Case-sensitive: Control chính xác từ khóa nào bị xóa
+
+### v1.5.27 (2025-11-15)
+**🐛 CRITICAL FIX: Prevent data loss in scheduled_posts.json**
+- **Root cause:** `load_scheduled_posts()` return `[]` on error → `save_scheduled_posts([])` ghi đè file → **MẤT HẾT DATA!**
+- **Fix:**
+  - `load_scheduled_posts()`: Raise exception + backup file khi có lỗi (không return `[]`)
+  - `save_scheduled_posts()`: Refuse to save empty list nếu file cũ có data
+  - Auto backup file trước mỗi lần save: `scheduled_posts.json.backup`
+  - Backup error file: `scheduled_posts.json.backup_error`
+  - `__init__`: Catch exception, show error dialog, KHÔNG save nếu posts = `[]`
+- **Safety measures:**
+  - Detailed error logging (exception type, traceback)
+  - Multiple backup points để recovery
+  - Prevent silent data loss
+- **Lợi ích:**
+  - 100% an toàn data: Không bao giờ ghi đè data với empty list
+  - User được thông báo rõ ràng khi có lỗi
+  - Có file backup để khôi phục
+- **Breaking change:** App sẽ show error dialog và start với empty list nếu load fail (thay vì silent fail)
+
+### v1.5.26 (2025-11-15)
 **✨ FEATURE: Thêm chế độ xem "Nhóm theo máy ảo" trong tab_post**
 - Thêm toggle view mode: **Danh sách phẳng** vs **Nhóm theo máy ảo**
 - **Grouped View:**
