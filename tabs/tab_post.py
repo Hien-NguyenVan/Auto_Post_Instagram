@@ -2461,7 +2461,7 @@ class PostTab(ctk.CTkFrame):
         # Dialog
         dialog = ctk.CTkToplevel(self)
         dialog.title("Chỉnh sửa tiêu đề hàng loạt")
-        dialog.geometry("700x700")
+        dialog.geometry("700x800")
         dialog.grab_set()
         dialog.configure(fg_color=COLORS["bg_primary"])
 
