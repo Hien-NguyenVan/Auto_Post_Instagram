@@ -31,7 +31,7 @@ from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
 from utils.vm_manager import vm_manager
-from utils.text_utils import remove_keywords_from_text
+from utils.text_utils import remove_keywords_from_text, remove_all_hashtags
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from config import LDCONSOLE_EXE, ADB_EXE
 from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG, TIMEOUT_DEFAULT, TIMEOUT_MINUTE
@@ -470,6 +470,14 @@ class Stream:
 
                         url = vid.get("url", "")
                         title = vid.get("title", "<3")
+
+                        # Apply auto remove hashtags if configured
+                        auto_remove_hashtags = self.cfg.get("auto_remove_hashtags", False)
+                        if auto_remove_hashtags:
+                            original_title = title
+                            title = remove_all_hashtags(title)
+                            if title != original_title:
+                                self.log(f"🗑️ Đã xóa tất cả hashtag khỏi title: {original_title} → {title}")
 
                         # Apply remove keywords if configured
                         remove_keywords = self.cfg.get("remove_keywords", "")
@@ -1312,7 +1320,8 @@ class FollowTab(ctk.CTkFrame):
             "interval_min": 60,
             "vm_name": "",
             "account_display": "",
-            "remove_keywords": ""  # Từ khóa loại bỏ khỏi title
+            "remove_keywords": "",  # Từ khóa loại bỏ khỏi title
+            "auto_remove_hashtags": False  # Tự động xóa tất cả hashtag
 
         }
         editing = False
@@ -1328,7 +1337,8 @@ class FollowTab(ctk.CTkFrame):
                 "interval_min": cfg["interval_min"],
                 "vm_name": cfg.get("vm_name", ""),  # THÊM
                 "account_display": cfg.get("account_display", ""),
-                "remove_keywords": cfg.get("remove_keywords", "")  # Load từ khóa
+                "remove_keywords": cfg.get("remove_keywords", ""),  # Load từ khóa
+                "auto_remove_hashtags": cfg.get("auto_remove_hashtags", False)  # Load auto remove hashtags
             }
 
         win = tk.Toplevel(self)
@@ -1421,6 +1431,15 @@ class FollowTab(ctk.CTkFrame):
         ent_keywords.pack(fill=tk.X, pady=4)
         tk.Label(frm, text="Ví dụ: #tiktok, #Tiktok, _R, [18+]", font=("Segoe UI", 8), fg="gray").pack(anchor="w")
 
+        # Checkbox: Auto remove all hashtags
+        auto_remove_hashtags_var = tk.BooleanVar(value=init.get("auto_remove_hashtags", False))
+        chk_remove_hashtags = ttk.Checkbutton(
+            frm,
+            text="🗑️ Tự động xóa tất cả hashtag (bao gồm cả dấu #)",
+            variable=auto_remove_hashtags_var
+        )
+        chk_remove_hashtags.pack(anchor="w", pady=(4, 0))
+
         btns = tk.Frame(frm)
         btns.pack(fill=tk.X, pady=8)
 
@@ -1481,7 +1500,8 @@ class FollowTab(ctk.CTkFrame):
                 "mode": mode,
                 "interval_min": iv,
                 "out_path": out_path,
-                "remove_keywords": ent_keywords.get().strip()  # Lưu từ khóa
+                "remove_keywords": ent_keywords.get().strip(),  # Lưu từ khóa
+                "auto_remove_hashtags": auto_remove_hashtags_var.get()  # Lưu auto remove hashtags
             }
 
             meta = load_streams_meta()
@@ -1507,7 +1527,8 @@ class FollowTab(ctk.CTkFrame):
                     "mode": mode,
                     "interval_min": iv,
                     "out_path": old_out,
-                    "remove_keywords": ent_keywords.get().strip()  # Lưu từ khóa
+                    "remove_keywords": ent_keywords.get().strip(),  # Lưu từ khóa
+                    "auto_remove_hashtags": auto_remove_hashtags_var.get()  # Lưu auto remove hashtags
                 }
 
                 # xóa dữ liệu cũ để không lẫn (và tạo file rỗng)

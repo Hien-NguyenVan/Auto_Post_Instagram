@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-16
-> **Phiên bản hiện tại:** v1.5.28
+> **Phiên bản hiện tại:** v1.5.29
 
 ---
 
@@ -336,7 +336,34 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.28 (2025-11-16) - Current Version
+### v1.5.29 (2025-11-16) - Current Version
+**✨ FEATURE: Add "Remove All Hashtags" option**
+- **Tab Post - Bulk edit titles:**
+  - Thêm checkbox "🗑️ Xóa tất cả hashtag (bao gồm cả dấu #)"
+  - Khi checkbox được chọn, tự động xóa TẤT CẢ hashtags khỏi title
+  - Disable keywords entry khi checkbox active
+  - Preview hiển thị chế độ "hashtag" vs "từ khóa"
+  - Confirmation dialog khác nhau cho 2 modes
+- **Tab Follow - Auto-remove hashtags:**
+  - Thêm checkbox "🗑️ Tự động xóa tất cả hashtag" trong dialog tạo/sửa luồng
+  - Config được lưu vào stream: `auto_remove_hashtags: true/false`
+  - Tự động apply khi fetch videos từ YouTube/TikTok
+  - Log realtime: `🗑️ Đã xóa tất cả hashtag khỏi title: ... → ...`
+  - Có thể kết hợp với remove_keywords (xóa hashtags TRƯỚC, sau đó xóa keywords)
+- **Helper utilities:**
+  - Thêm `remove_all_hashtags()` vào `utils/text_utils.py`
+  - Dùng regex pattern `#\S+` để match hashtags
+  - Auto clean multiple spaces sau khi xóa
+- **Use cases:**
+  - Xóa ALL hashtags 1 click: `#tiktok #viral #fyp` → ` ` (clean)
+  - Ví dụ: "CĐM BỨC XÚC #theanh28 #viral" → "CĐM BỨC XÚC"
+  - Kết hợp: Xóa hashtags + xóa watermark (_R, [18+])
+- **Lợi ích:**
+  - Nhanh hơn: 1 click xóa tất cả hashtags (không cần list từng hashtag)
+  - Linh hoạt: Có thể chọn xóa hashtags hoặc xóa keywords cụ thể
+  - Auto-apply: Luồng tự động có thể xóa hashtags cho tất cả videos
+
+### v1.5.28 (2025-11-16)
 **✨ FEATURE: Remove keywords from video titles (case-sensitive)**
 - **Tab Post - Bulk edit titles:**
   - Thêm nút "✏️ Chỉnh sửa tiêu đề" trong hàng "Cấu hình hàng loạt"

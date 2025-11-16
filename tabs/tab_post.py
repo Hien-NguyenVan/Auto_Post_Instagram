@@ -48,7 +48,7 @@ from utils.tiktok_api_rapidapi import (
     download_tiktok_video,
     convert_to_output_format
 )
-from utils.text_utils import remove_keywords_from_text, parse_keywords_input
+from utils.text_utils import remove_keywords_from_text, parse_keywords_input, remove_all_hashtags
 
 
 # ==================== CONSTANTS ====================
@@ -2540,6 +2540,25 @@ class PostTab(ctk.CTkFrame):
         )
         keywords_entry.pack(fill="x", padx=10, pady=(0, 5))
 
+        # Checkbox: Remove all hashtags
+        remove_hashtags_var = ctk.BooleanVar(value=False)
+
+        def on_checkbox_change():
+            """Disable/enable keywords_entry based on checkbox"""
+            if remove_hashtags_var.get():
+                keywords_entry.configure(state="disabled", placeholder_text="(Tự động xóa tất cả hashtag)")
+            else:
+                keywords_entry.configure(state="normal", placeholder_text="Ví dụ: #tiktok, #Tiktok, _R, [18+]")
+
+        checkbox_hashtag = ctk.CTkCheckBox(
+            keyword_frame,
+            text="🗑️ Xóa tất cả hashtag (bao gồm cả dấu #)",
+            variable=remove_hashtags_var,
+            command=on_checkbox_change,
+            font=(FONTS["family"], FONTS["size_small"])
+        )
+        checkbox_hashtag.pack(anchor="w", padx=10, pady=(5, 5))
+
         # Example
         ctk.CTkLabel(
             keyword_frame,
@@ -2572,13 +2591,18 @@ class PostTab(ctk.CTkFrame):
 
         def show_preview():
             """Hiển thị preview thay đổi"""
-            keywords_string = keywords_entry.get().strip()
-            if not keywords_string:
-                preview_text.configure(state="normal")
-                preview_text.delete("1.0", "end")
-                preview_text.insert("1.0", "⚠️ Vui lòng nhập từ khóa!")
-                preview_text.configure(state="disabled")
-                return
+            # Check if remove all hashtags is selected
+            remove_all = remove_hashtags_var.get()
+
+            if not remove_all:
+                # Normal mode: require keywords
+                keywords_string = keywords_entry.get().strip()
+                if not keywords_string:
+                    preview_text.configure(state="normal")
+                    preview_text.delete("1.0", "end")
+                    preview_text.insert("1.0", "⚠️ Vui lòng nhập từ khóa hoặc chọn 'Xóa tất cả hashtag'!")
+                    preview_text.configure(state="disabled")
+                    return
 
             # Parse range
             try:
@@ -2602,7 +2626,13 @@ class PostTab(ctk.CTkFrame):
 
                 total_in_range += 1
                 original_title = post.title
-                new_title = remove_keywords_from_text(original_title, keywords_string)
+
+                # Apply transformation based on mode
+                if remove_all:
+                    new_title = remove_all_hashtags(original_title)
+                else:
+                    keywords_string = keywords_entry.get().strip()
+                    new_title = remove_keywords_from_text(original_title, keywords_string)
 
                 if new_title != original_title:
                     changed_count += 1
@@ -2615,12 +2645,16 @@ class PostTab(ctk.CTkFrame):
             preview_text.delete("1.0", "end")
 
             if changed_count == 0:
-                preview_text.insert("1.0", f"ℹ️ Không tìm thấy từ khóa nào trong {total_in_range} video (phạm vi {start_idx}-{end_idx})\n\n"
-                                          f"Kiểm tra lại:\n"
-                                          f"- Từ khóa có đúng chính tả không?\n"
-                                          f"- Phân biệt hoa thường (case-sensitive)")
+                if remove_all:
+                    preview_text.insert("1.0", f"ℹ️ Không tìm thấy hashtag nào trong {total_in_range} video (phạm vi {start_idx}-{end_idx})")
+                else:
+                    preview_text.insert("1.0", f"ℹ️ Không tìm thấy từ khóa nào trong {total_in_range} video (phạm vi {start_idx}-{end_idx})\n\n"
+                                              f"Kiểm tra lại:\n"
+                                              f"- Từ khóa có đúng chính tả không?\n"
+                                              f"- Phân biệt hoa thường (case-sensitive)")
             else:
-                summary = f"✅ Tìm thấy {changed_count}/{total_in_range} video có từ khóa\n\n"
+                mode_text = "hashtag" if remove_all else "từ khóa"
+                summary = f"✅ Tìm thấy {changed_count}/{total_in_range} video có {mode_text}\n\n"
                 preview_text.insert("1.0", summary + "\n".join(preview_lines[:50]))  # Limit 50 lines
 
                 if len(preview_lines) > 50:
@@ -2641,10 +2675,15 @@ class PostTab(ctk.CTkFrame):
 
         def on_apply():
             """Áp dụng loại bỏ từ khóa"""
-            keywords_string = keywords_entry.get().strip()
-            if not keywords_string:
-                messagebox.showerror("Lỗi", "Vui lòng nhập từ khóa!", parent=dialog)
-                return
+            # Check if remove all hashtags is selected
+            remove_all = remove_hashtags_var.get()
+
+            if not remove_all:
+                # Normal mode: require keywords
+                keywords_string = keywords_entry.get().strip()
+                if not keywords_string:
+                    messagebox.showerror("Lỗi", "Vui lòng nhập từ khóa hoặc chọn 'Xóa tất cả hashtag'!", parent=dialog)
+                    return
 
             # Parse range
             try:
@@ -2663,16 +2702,27 @@ class PostTab(ctk.CTkFrame):
                 return
 
             # Confirm
-            parsed_keywords = parse_keywords_input(keywords_string)
-            if not messagebox.askyesno(
-                "Xác nhận",
-                f"⚠️ Bạn có chắc muốn loại bỏ từ khóa khỏi tiêu đề video?\n\n"
-                f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
-                f"🔑 Từ khóa: {len(parsed_keywords)} từ\n"
-                f"   {', '.join(parsed_keywords[:5])}{'...' if len(parsed_keywords) > 5 else ''}\n\n"
-                f"💡 Thay đổi này sẽ được lưu vĩnh viễn!",
-                parent=dialog
-            ):
+            if remove_all:
+                confirm_msg = (
+                    f"⚠️ Bạn có chắc muốn xóa TẤT CẢ HASHTAG khỏi tiêu đề video?\n\n"
+                    f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                    f"🗑️ Chế độ: Xóa tất cả hashtag (bao gồm cả dấu #)\n\n"
+                    f"💡 Thay đổi này sẽ được lưu vĩnh viễn!"
+                )
+                operation_desc = "Xóa tất cả hashtag"
+            else:
+                keywords_string = keywords_entry.get().strip()
+                parsed_keywords = parse_keywords_input(keywords_string)
+                confirm_msg = (
+                    f"⚠️ Bạn có chắc muốn loại bỏ từ khóa khỏi tiêu đề video?\n\n"
+                    f"📊 Phạm vi: Video {start_idx} đến {end_idx}\n"
+                    f"🔑 Từ khóa: {len(parsed_keywords)} từ\n"
+                    f"   {', '.join(parsed_keywords[:5])}{'...' if len(parsed_keywords) > 5 else ''}\n\n"
+                    f"💡 Thay đổi này sẽ được lưu vĩnh viễn!"
+                )
+                operation_desc = ", ".join(parsed_keywords)
+
+            if not messagebox.askyesno("Xác nhận", confirm_msg, parent=dialog):
                 return
 
             # Apply changes
@@ -2682,7 +2732,13 @@ class PostTab(ctk.CTkFrame):
                     continue
 
                 original_title = post.title
-                new_title = remove_keywords_from_text(original_title, keywords_string)
+
+                # Apply transformation based on mode
+                if remove_all:
+                    new_title = remove_all_hashtags(original_title)
+                else:
+                    keywords_string = keywords_entry.get().strip()
+                    new_title = remove_keywords_from_text(original_title, keywords_string)
 
                 if new_title != original_title:
                     post.title = new_title
@@ -2692,7 +2748,7 @@ class PostTab(ctk.CTkFrame):
             result["changed_count"] = changed_count
             result["start_idx"] = start_idx
             result["end_idx"] = min(end_idx, len(self.posts))
-            result["keywords"] = ", ".join(parsed_keywords)
+            result["keywords"] = operation_desc
             dialog.destroy()
 
         # Buttons

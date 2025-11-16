@@ -3,6 +3,8 @@ Text Utilities
 Các hàm tiện ích xử lý text, string manipulation
 """
 
+import re
+
 
 def remove_keywords_from_text(text, keywords_string):
     """
@@ -76,3 +78,31 @@ def preview_keyword_removal(text, keywords_string):
     result = remove_keywords_from_text(text, keywords_string)
     changed = 1 if result != text else 0
     return result, changed
+
+
+def remove_all_hashtags(text):
+    """
+    Xóa tất cả hashtags khỏi text (bao gồm cả dấu #)
+
+    Args:
+        text: Chuỗi text cần xử lý
+
+    Returns:
+        str: Text đã loại bỏ tất cả hashtags
+
+    Example:
+        >>> remove_all_hashtags("CĐM #theanh28 #viral ABC")
+        "CĐM  ABC"
+    """
+    if not text:
+        return text
+
+    # Remove all hashtags: # followed by non-whitespace characters
+    # Pattern: #\S+ matches # and any non-whitespace characters after it
+    result = re.sub(r'#\S+', '', text)
+
+    # Clean up multiple spaces
+    while "  " in result:
+        result = result.replace("  ", " ")
+
+    return result.strip()
