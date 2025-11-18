@@ -30,6 +30,7 @@ from utils.download_dlp import download_video_api
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
+from utils.file_checker import verify_file_after_push
 from utils.vm_manager import vm_manager
 from utils.text_utils import remove_keywords_from_text, remove_all_hashtags
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -722,6 +723,44 @@ class Stream:
                                     continue
 
                             self.log(f"✅ Đã gửi video sang máy ảo")
+
+                            # ✅ v1.5.30: Verify file đã có trong VM sau khi push
+                            filename = os.path.basename(video_path)
+                            remote_path = f"/sdcard/DCIM/{filename}"
+
+                            # Get expected file size
+                            try:
+                                local_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+                            except:
+                                local_size_mb = None  # Nếu không lấy được size, chỉ check tồn tại
+
+                            # Verify với retry mechanism (wait 5s, retry 3 lần nếu chưa có)
+                            self.log(f"🔍 Đang verify file trong VM...")
+                            verified = verify_file_after_push(
+                                vm_name,
+                                remote_path,
+                                expected_size_mb=local_size_mb,
+                                wait_seconds=5,
+                                max_retries=3,
+                                log_callback=lambda msg: self.log(msg)
+                            )
+
+                            if not verified:
+                                self.log(f"❌ File verification FAILED - File không có trong VM sau khi push!")
+
+                                if os.path.exists(video_path):
+                                    os.remove(video_path)
+
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
+                                self.log(f"✅ Đã tắt máy ảo")
+                                continue  # Skip to next video
+
                             time.sleep(WAIT_MEDIUM)
 
                             # ========== ĐĂNG BÀI ==========

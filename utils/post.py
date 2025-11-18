@@ -44,6 +44,10 @@ class InstagramPost(BaseInstagramAutomation):
         """
         Retry broadcast MediaStore để Gallery/Instagram nhận ra file.
 
+        Strategy:
+        - Lần 1-2: Scan file cụ thể
+        - Lần 3: Scan toàn bộ DCIM folder (force full refresh)
+
         Args:
             adb_address: ADB device address (e.g., "emulator-5554")
             video_filename: Video filename (e.g., 'video.mp4')
@@ -61,18 +65,34 @@ class InstagramPost(BaseInstagramAutomation):
 
         for attempt in range(1, max_retries + 1):
             try:
-                self.log(vm_name, f"🔁 Retry broadcast MediaStore (lần {attempt}/{max_retries})...")
-                subprocess.run([
-                    ADB_EXE, "-s", adb_address, "shell",
-                    "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-                    "-d", f"file://{remote_path}"
-                ],
-                capture_output=True, text=True, encoding="utf-8", errors="ignore",
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                timeout=10
-                )
-                self.log(vm_name, f"✅ Đã retry broadcast MediaStore (lần {attempt})")
-                time.sleep(2)  # Đợi MediaStore update
+                # ✅ v1.5.32: Lần cuối cùng scan toàn bộ DCIM folder thay vì từng file
+                if attempt == max_retries:
+                    self.log(vm_name, f"🔁 Retry {attempt}/{max_retries}: Scan toàn bộ DCIM folder...")
+                    # Scan entire DCIM folder
+                    subprocess.run([
+                        ADB_EXE, "-s", adb_address, "shell",
+                        "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                        "-d", "file:///sdcard/DCIM"
+                    ],
+                    capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=15  # Timeout lâu hơn cho folder scan
+                    )
+                else:
+                    self.log(vm_name, f"🔁 Retry {attempt}/{max_retries}: Scan file {video_filename}...")
+                    # Scan specific file
+                    subprocess.run([
+                        ADB_EXE, "-s", adb_address, "shell",
+                        "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                        "-d", f"file://{remote_path}"
+                    ],
+                    capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                    )
+
+                self.log(vm_name, f"✅ Đã broadcast MediaStore (lần {attempt})")
+                time.sleep(3)  # Tăng từ 2s lên 3s để đợi MediaStore update
                 return True
             except Exception as e:
                 self.log(vm_name, f"⚠️ Lỗi retry broadcast (lần {attempt}): {e}")
@@ -246,7 +266,8 @@ class InstagramPost(BaseInstagramAutomation):
 
             # Kiểm tra có file trong gallery hay chưa
             self.log(vm_name, "🔍 Kiểm tra file trong gallery...")
-            if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box", timeout=WAIT_SHORT):
+            # ✅ v1.5.32: Tăng timeout từ WAIT_SHORT lên WAIT_LONG (15s) để đợi Instagram refresh gallery
+            if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box", timeout=WAIT_LONG):
                 # File chưa xuất hiện trong gallery → Retry broadcast MediaStore
                 self.log(vm_name, "⚠️ File chưa xuất hiện trong gallery")
                 if video_filename:
@@ -255,9 +276,25 @@ class InstagramPost(BaseInstagramAutomation):
 
                     # Kiểm tra lại sau khi retry
                     if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box", timeout=WAIT_MEDIUM):
-                        self.log(vm_name, "❌ File vẫn không xuất hiện sau khi retry broadcast")
-                        self._capture_failure_screenshot(adb_address, vm_name, "File không xuất hiện trong gallery sau retry broadcast")
-                        return False
+                        # ✅ v1.5.32: Lần cuối cùng thử force refresh gallery (back + reopen)
+                        self.log(vm_name, "⚠️ Vẫn không thấy file - Thử force refresh gallery...")
+
+                        # Back ra khỏi gallery picker
+                        d.press("back")
+                        time.sleep(2)
+
+                        # Vào lại Post gallery
+                        self.log(vm_name, "🔄 Mở lại gallery picker...")
+                        self.safe_click(d, XPATH_POST, sleep_after=WAIT_SHORT, vm_name=vm_name, description="Post selector (retry)")
+                        time.sleep(2)
+
+                        # Check lần cuối
+                        if not self.wait_for_element(d, XPATH_FIRST_BOX, vm_name=vm_name, description="first box (after refresh)", timeout=WAIT_LONG):
+                            self.log(vm_name, "❌ File vẫn không xuất hiện sau khi force refresh gallery")
+                            self._capture_failure_screenshot(adb_address, vm_name, "File không xuất hiện trong gallery sau force refresh")
+                            return False
+                        else:
+                            self.log(vm_name, "✅ File đã xuất hiện sau khi force refresh gallery!")
                     else:
                         self.log(vm_name, "✅ File đã xuất hiện sau khi retry broadcast")
                 else:

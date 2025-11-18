@@ -27,6 +27,7 @@ from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG, TIMEO
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
 from utils.delete_file import clear_dcim, clear_pictures
+from utils.file_checker import verify_file_after_push
 from utils.vm_manager import vm_manager
 from utils.download_dlp import download_video_api
 from utils.api_manager_multi import multi_api_manager
@@ -733,7 +734,7 @@ class PostScheduler(threading.Thread):
                         post.log(f"❌ Gửi file thất bại")
                         post.status = "failed"
                         self.ui_queue.put(("status_update", post.id, "failed"))
-        
+
                         # Cleanup
                         subprocess.run(
                             [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
@@ -744,8 +745,46 @@ class PostScheduler(threading.Thread):
                         self.running_posts.discard(post.id)
                         save_scheduled_posts(self.posts)
                         raise Exception("Attempt failed")
-        
+
                     post.log(f"✅ Đã gửi file thành công")
+
+                    # ✅ v1.5.30: Verify file đã có trong VM sau khi push
+                    filename = os.path.basename(post.video_path)
+                    remote_path = f"/sdcard/DCIM/{filename}"
+
+                    # Get expected file size
+                    try:
+                        local_size_mb = os.path.getsize(post.video_path) / (1024 * 1024)
+                    except:
+                        local_size_mb = None  # Nếu không lấy được size, chỉ check tồn tại
+
+                    # Verify với retry mechanism (wait 5s, retry 3 lần nếu chưa có)
+                    post.log(f"🔍 Đang verify file trong VM...")
+                    verified = verify_file_after_push(
+                        post.vm_name,
+                        remote_path,
+                        expected_size_mb=local_size_mb,
+                        wait_seconds=5,
+                        max_retries=3,
+                        log_callback=lambda msg: post.log(msg)
+                    )
+
+                    if not verified:
+                        post.log(f"❌ File verification FAILED - File không có trong VM sau khi push!")
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+
+                        # Cleanup
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                        time.sleep(WAIT_EXTRA_LONG)
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+
                     time.sleep(WAIT_MEDIUM)
         
                     # Check stop request after sending file
@@ -1846,7 +1885,7 @@ class PostTab(ctk.CTkFrame):
         # Start index
         ctk.CTkLabel(index_row, text="Từ video thứ:", width=110, anchor="w").pack(side="left")
         entry_start_index = ctk.CTkEntry(index_row, width=80)
-        entry_start_index.insert(0, "1")
+        entry_start_index.insert(0, "999")
         entry_start_index.pack(side="left", padx=5)
 
         # End index

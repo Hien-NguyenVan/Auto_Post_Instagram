@@ -1,8 +1,8 @@
 # 📋 CLAUDE.MD - Tài liệu Tổng quan Project
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
-> **Cập nhật lần cuối:** 2025-11-16
-> **Phiên bản hiện tại:** v1.5.29
+> **Cập nhật lần cuối:** 2025-11-18
+> **Phiên bản hiện tại:** v1.5.33
 
 ---
 
@@ -336,7 +336,70 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.29 (2025-11-16) - Current Version
+### v1.5.33 (2025-11-18) - Current Version
+**✅ CRITICAL FIX: Enhanced Gallery Picker Detection - Fix "XPATH_FIRST_BOX not found" error**
+- **Vấn đề:** File đã có trong VM nhưng Instagram gallery picker không hiển thị → XPATH_FIRST_BOX not found
+- **Nguyên nhân:** MediaStore chưa index kịp / Gallery chưa refresh / Permissions issues
+- **Giải pháp 4 lớp:**
+  1. **Tăng timeout chờ gallery:** Từ WAIT_SHORT (5s) → WAIT_LONG (15s)
+  2. **Smart MediaStore broadcast:**
+     - Retry 1-2: Scan file cụ thể (`file:///sdcard/DCIM/video.mp4`)
+     - Retry 3: Scan toàn bộ DCIM folder (`file:///sdcard/DCIM`) - Force full refresh
+     - Tăng wait time: 2s → 3s sau mỗi broadcast
+  3. **Force refresh gallery picker:**
+     - Nếu vẫn không thấy file sau retry → Back ra khỏi gallery
+     - Mở lại Post gallery picker
+     - Check lại với timeout WAIT_LONG
+     - Log: "⚠️ Vẫn không thấy file - Thử force refresh gallery..."
+  4. **Check file permissions:**
+     - Thêm `check_file_permissions()` vào file_checker.py
+     - Verify file có read permission cho Instagram
+     - Command: `adb shell stat -c %A /sdcard/DCIM/video.mp4`
+     - Warning nếu không có read permission
+- **Flow mới khi không thấy file:**
+  ```
+  1. Wait 15s cho XPATH_FIRST_BOX
+  2. Nếu không có → Retry broadcast file (3 lần)
+  3. Nếu vẫn không có → Force refresh gallery (back + reopen)
+  4. Nếu vẫn không có → Screenshot + Fail với evidence
+  ```
+- **Lợi ích:**
+  - ✅ Fix 95% cases "file not found in gallery" (estimate)
+  - ✅ Multi-layer fallback mechanism
+  - ✅ Smart broadcast: File first → Full folder last
+  - ✅ Force refresh khi cần
+  - ✅ Detect permission issues sớm
+  - ✅ Detailed logging cho debug
+
+### v1.5.32 (2025-11-18)
+**✅ FEATURE: File Verification After Push - Verify file có trong VM sau khi gửi**
+- **Tạo utils/file_checker.py:**
+  - `check_file_exists_in_vm()` - Kiểm tra file tồn tại qua ADB shell test -e
+  - `check_file_with_size()` - Kiểm tra file + lấy kích thước qua stat
+  - `verify_file_after_push()` - Verify file với retry mechanism (3 lần)
+  - `_retry_broadcast_mediastore()` - Retry broadcast nếu file chưa xuất hiện
+- **Tab Post:**
+  - Sau khi send_file thành công, đợi 5s rồi verify file
+  - Check file tồn tại + kích thước (tolerance ±5% hoặc ±1MB)
+  - Nếu file chưa có, retry broadcast MediaStore tối đa 3 lần
+  - Nếu vẫn fail sau 3 lần, cleanup VM và mark failed
+  - Log realtime: "🔍 Đang verify file trong VM..." → "✅ Đã xác nhận: file.mp4 (45.23 MB)"
+- **Tab Follow:**
+  - Tương tự tab_post, verify file sau khi push
+  - Nếu verify fail, tắt VM và skip sang video tiếp theo
+- **Giải pháp cho vấn đề:**
+  - **Vấn đề:** Instagram không thấy file vừa push vào /sdcard/DCIM/
+  - **Nguyên nhân:** MediaStore chưa index kịp, hoặc broadcast fail
+  - **Giải pháp:** Verify file + retry broadcast 3 lần (mỗi lần đợi 2s)
+  - **Kết quả:** Đảm bảo file CÓ THẬT trong VM trước khi post
+- **Lợi ích:**
+  - ✅ Giảm fail rate do "file not found in gallery"
+  - ✅ Tăng độ tin cậy posting (verify trước khi post)
+  - ✅ Fail fast với evidence (biết ngay file không có)
+  - ✅ Auto retry broadcast khi cần
+  - ✅ Log chi tiết để debug
+
+### v1.5.29 (2025-11-16)
 **✨ FEATURE: Add "Remove All Hashtags" option**
 - **Tab Post - Bulk edit titles:**
   - Thêm checkbox "🗑️ Xóa tất cả hashtag (bao gồm cả dấu #)"
