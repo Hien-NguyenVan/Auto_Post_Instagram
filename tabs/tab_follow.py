@@ -562,9 +562,23 @@ class Stream:
                                 vm_info = json.load(f)
                             port = vm_info.get("port")
                             adb_device = f"emulator-{port}"
-                            self.log(f"⏳ Chờ ADB kết nối...")
 
-                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=self.log):
+                            # Ensure ADB connection (force connect nếu cần)
+                            self.log(f"🔌 Đang kết nối ADB...")
+                            if not vm_manager.ensure_adb_connected(adb_device, ADB_EXE, max_retries=3, log_callback=self.log):
+                                self.log(f"❌ Không thể kết nối ADB đến '{adb_device}'")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
+                                self.log(f"❌ Lỗi kết nối ADB - Đã tắt máy ảo")
+                                continue  # Skip video này
+
+                            self.log(f"⏳ Chờ ADB sẵn sàng...")
+                            if not vm_manager.wait_adb_ready(adb_device, ADB_EXE, timeout=30, log_callback=self.log):
                                 self.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_device}'")
                                 self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
                                 self.worker_helper.run_subprocess(

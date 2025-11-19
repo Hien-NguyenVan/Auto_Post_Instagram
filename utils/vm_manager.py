@@ -305,6 +305,137 @@ class VMManager:
         return False
 
     @staticmethod
+    def ensure_adb_connected(device: str, adb_path: str, max_retries: int = 3,
+                             log_callback=None) -> bool:
+        """
+        Ensure ADB connection to device. Force connect nếu device không có trong adb devices.
+
+        LDPlayer đôi khi không tự động connect vào ADB server sau khi VM khởi động.
+        Function này sẽ:
+        1. Check device có trong 'adb devices' không
+        2. Nếu không có hoặc offline → Force connect bằng 'adb connect 127.0.0.1:port'
+        3. Retry tối đa max_retries lần
+
+        Args:
+            device: Device name (vd: "emulator-5554")
+            adb_path: Đường dẫn đến adb.exe
+            max_retries: Số lần retry tối đa (default 3)
+            log_callback: Optional callback function(msg) để log ra UI
+
+        Returns:
+            bool: True nếu device đã connect, False nếu fail sau max_retries
+
+        Example:
+            >>> VMManager.ensure_adb_connected("emulator-5554", "path/to/adb.exe")
+            True
+        """
+        logger = logging.getLogger(__name__)
+
+        # Extract port từ device name (emulator-5554 → 5554)
+        try:
+            port = device.split("-")[1]
+            connect_addr = f"127.0.0.1:{port}"
+        except (IndexError, ValueError):
+            logger.error(f"Invalid device format: {device}")
+            if log_callback:
+                log_callback(f"❌ Device name không hợp lệ: {device}")
+            return False
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Check device có trong adb devices không
+                result = subprocess.run(
+                    [adb_path, "devices"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                device_found = False
+                device_ready = False
+                for line in result.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == device:
+                        device_found = True
+                        if parts[1] == "device":
+                            device_ready = True
+                        break
+
+                if device_ready:
+                    if log_callback and attempt > 1:
+                        log_callback(f"   ✅ ADB đã kết nối sau {attempt} lần thử")
+                    logger.info(f"Device '{device}' đã kết nối ADB (attempt {attempt})")
+                    return True
+
+                # Device chưa có hoặc offline → Force connect
+                if log_callback:
+                    status = "offline" if device_found else "chưa có trong adb devices"
+                    log_callback(f"   🔌 Device {status} - Force connect (lần {attempt}/{max_retries})...")
+
+                logger.info(f"Attempting adb connect {connect_addr} (try {attempt}/{max_retries})")
+
+                connect_result = subprocess.run(
+                    [adb_path, "connect", connect_addr],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                if log_callback:
+                    # Log output từ adb connect
+                    output = connect_result.stdout.strip()
+                    if output:
+                        log_callback(f"      {output}")
+
+                # Wait 2s sau mỗi lần connect để ADB settle
+                time.sleep(2)
+
+                # Verify connection
+                verify_result = subprocess.run(
+                    [adb_path, "devices"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=10
+                )
+
+                for line in verify_result.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == device and parts[1] == "device":
+                        if log_callback:
+                            log_callback(f"   ✅ ADB connect thành công!")
+                        logger.info(f"✅ Successfully connected to {device}")
+                        return True
+
+                # Chưa connect được, retry
+                if attempt < max_retries:
+                    logger.warning(f"Connect failed (attempt {attempt}), retrying...")
+                    time.sleep(1)
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"ADB command timeout (attempt {attempt})")
+                if log_callback:
+                    log_callback(f"   ⚠️ Timeout khi connect ADB (lần {attempt})")
+            except Exception as e:
+                logger.error(f"Error ensuring ADB connection (attempt {attempt}): {e}")
+                if log_callback:
+                    log_callback(f"   ⚠️ Lỗi ADB connect: {e}")
+
+        # Failed sau max_retries
+        if log_callback:
+            log_callback(f"❌ Không thể connect ADB sau {max_retries} lần thử")
+        logger.error(f"Failed to connect ADB to {device} after {max_retries} attempts")
+        return False
+
+    @staticmethod
     def wait_vm_stopped(vm_name: str, ldconsole_path: str, timeout: int = 60,
                         check_interval: int = 2) -> bool:
         """

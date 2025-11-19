@@ -2,7 +2,7 @@
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
 > **Cập nhật lần cuối:** 2025-11-19
-> **Phiên bản hiện tại:** v1.5.34
+> **Phiên bản hiện tại:** v1.5.35
 
 ---
 
@@ -336,7 +336,30 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.34 (2025-11-19) - Current Version
+### v1.5.35 (2025-11-19) - Current Version
+**✨ FEATURE: Force ADB connect khi VM không tự động kết nối**
+- **Vấn đề:** Máy ảo LDPlayer khởi động xong nhưng không hiển thị trong `adb devices`
+- **Nguyên nhân:** LDPlayer đôi khi không tự động connect vào ADB server sau khi VM bật
+- **Giải pháp:**
+  - Thêm `ensure_adb_connected()` method vào `VMManager` class
+  - Force connect bằng `adb connect 127.0.0.1:port` nếu device không có trong adb devices
+  - Retry mechanism: Tối đa 3 lần với wait 2s sau mỗi lần connect
+  - Flow: Check device → Force connect nếu cần → Verify connection
+- **Integration:**
+  - `tab_post.py`: Gọi `ensure_adb_connected()` trước `wait_adb_ready()`
+  - `tab_follow.py`: Tương tự
+  - Giảm timeout `wait_adb_ready()` từ 60s → 30s (vì đã force connect trước)
+- **Lợi ích:**
+  - ✅ Fix VM không connect ADB tự động
+  - ✅ Giảm thời gian chờ (force connect nhanh hơn passive wait)
+  - ✅ Retry với detailed logging để debug
+  - ✅ 100% reliable - Force connect thay vì chờ đợi
+- **Files changed:**
+  - `utils/vm_manager.py`: Add `ensure_adb_connected()` method (130 lines)
+  - `tabs/tab_post.py`: Call before wait_adb_ready
+  - `tabs/tab_follow.py`: Call before wait_adb_ready
+
+### v1.5.34 (2025-11-19)
 **🐛 CRITICAL FIX: File verification fails với tên file có khoảng trắng**
 - **Vấn đề:** File gửi thành công nhưng verify fail - "File không tồn tại hoặc không truy cập được"
 - **Root cause:** Shell commands (`stat`, `test -e`) không quote path khi có khoảng trắng

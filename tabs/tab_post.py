@@ -562,9 +562,26 @@ class PostScheduler(threading.Thread):
                         self.ui_queue.put(("status_update", post.id, "failed"))
                         raise Exception("Attempt failed")
         
-                    # Wait for ADB to connect
-                    post.log(f"⏳ Chờ ADB kết nối...")
-                    if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=TIMEOUT_MINUTE, log_callback=post.log):
+                    # Ensure ADB connection (force connect nếu cần)
+                    post.log(f"🔌 Đang kết nối ADB...")
+                    if not vm_manager.ensure_adb_connected(adb_address, ADB_EXE, max_retries=3, log_callback=post.log):
+                        post.log(f"❌ Không thể kết nối ADB đến '{adb_address}'")
+                        post.log(f"🛑 Đang tắt máy ảo...")
+                        subprocess.run(
+                            [LDCONSOLE_EXE, "quit", "--name", post.vm_name],
+                            creationflags=subprocess.CREATE_NO_WINDOW
+                        )
+                        vm_manager.wait_vm_stopped(post.vm_name, LDCONSOLE_EXE, timeout=60)
+                        time.sleep(WAIT_EXTRA_LONG)
+                        post.status = "failed"
+                        self.ui_queue.put(("status_update", post.id, "failed"))
+                        self.running_posts.discard(post.id)
+                        save_scheduled_posts(self.posts)
+                        raise Exception("Attempt failed")
+
+                    # Wait for ADB to be fully ready
+                    post.log(f"⏳ Chờ ADB sẵn sàng...")
+                    if not vm_manager.wait_adb_ready(adb_address, ADB_EXE, timeout=30, log_callback=post.log):
                         post.log(f"⏱️ Timeout - ADB không kết nối được đến '{adb_address}'")
                         post.log(f"🛑 Đang tắt máy ảo...")
                         subprocess.run(
