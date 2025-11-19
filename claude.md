@@ -1,8 +1,8 @@
 # 📋 CLAUDE.MD - Tài liệu Tổng quan Project
 
 > **Mục đích:** File này dùng để Claude hiểu nhanh toàn bộ project khi bắt đầu cuộc hội thoại mới.
-> **Cập nhật lần cuối:** 2025-11-18
-> **Phiên bản hiện tại:** v1.5.33
+> **Cập nhật lần cuối:** 2025-11-19
+> **Phiên bản hiện tại:** v1.5.34
 
 ---
 
@@ -336,7 +336,27 @@ with Timer("Operation name"):
 > - Đúng: v1.5.20 → v1.5.21 → v1.5.22 ✅
 > - Sai: v1.5.20 → v1.5.20.1 → v1.5.20.2 ❌
 
-### v1.5.33 (2025-11-18) - Current Version
+### v1.5.34 (2025-11-19) - Current Version
+**🐛 CRITICAL FIX: File verification fails với tên file có khoảng trắng**
+- **Vấn đề:** File gửi thành công nhưng verify fail - "File không tồn tại hoặc không truy cập được"
+- **Root cause:** Shell commands (`stat`, `test -e`) không quote path khi có khoảng trắng
+  - Ví dụ: `stat -c %s /sdcard/DCIM/A World-famous...mp4`
+  - Shell parse thành: `stat -c %s /sdcard/DCIM/A` (chỉ lấy phần đầu!)
+  - ADB push thành công (nhận 2 args riêng) nhưng verify fail (shell parse sai)
+- **Fix:**
+  - Import `shlex` module vào `utils/file_checker.py`
+  - Quote tất cả file paths bằng `shlex.quote(file_path)` trong shell commands
+  - Fix 3 functions:
+    1. `check_file_exists_in_vm()` - Line 52: `test -e {quoted_path}`
+    2. `check_file_with_size()` - Line 115: `stat -c %s {quoted_path}`
+    3. `check_file_permissions()` - Line 269: `stat -c %A {quoted_path}`
+- **Lợi ích:**
+  - ✅ Fix verify file với tên có khoảng trắng, dấu phẩy, ký tự đặc biệt
+  - ✅ File verification hoạt động 100% với mọi tên file
+  - ✅ Không còn false negative "file không tồn tại"
+  - ✅ Safe và portable - dùng shlex.quote() chuẩn Python
+
+### v1.5.33 (2025-11-18)
 **✅ CRITICAL FIX: Enhanced Gallery Picker Detection - Fix "XPATH_FIRST_BOX not found" error**
 - **Vấn đề:** File đã có trong VM nhưng Instagram gallery picker không hiển thị → XPATH_FIRST_BOX not found
 - **Nguyên nhân:** MediaStore chưa index kịp / Gallery chưa refresh / Permissions issues

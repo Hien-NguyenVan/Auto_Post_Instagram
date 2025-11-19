@@ -6,6 +6,7 @@ Sử dụng ADB shell commands để verify file đã được push thành công
 import subprocess
 import json
 import os
+import shlex
 from config import ADB_EXE
 
 DATA_DIR = os.path.join(os.getcwd(), "data")
@@ -47,8 +48,10 @@ def check_file_exists_in_vm(vm_name, file_path, log_callback=None):
         device = f"emulator-{port}"
 
         # 2. Check file via ADB shell test -e
+        # Quote path để handle khoảng trắng và ký tự đặc biệt
+        quoted_path = shlex.quote(file_path)
         result = subprocess.run(
-            [ADB_EXE, "-s", device, "shell", "test", "-e", file_path],
+            [ADB_EXE, "-s", device, "shell", f"test -e {quoted_path}"],
             capture_output=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
             timeout=10
@@ -108,8 +111,10 @@ def check_file_with_size(vm_name, file_path, log_callback=None):
         device = f"emulator-{port}"
 
         # 2. Get file size via stat -c %s
+        # Quote path để handle khoảng trắng và ký tự đặc biệt
+        quoted_path = shlex.quote(file_path)
         result = subprocess.run(
-            [ADB_EXE, "-s", device, "shell", "stat", "-c", "%s", file_path],
+            [ADB_EXE, "-s", device, "shell", f"stat -c %s {quoted_path}"],
             capture_output=True,
             text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
@@ -260,8 +265,10 @@ def check_file_permissions(vm_name, file_path, log_callback=None):
         device = f"emulator-{port}"
 
         # Get file permissions via stat
+        # Quote path để handle khoảng trắng và ký tự đặc biệt
+        quoted_path = shlex.quote(file_path)
         result = subprocess.run(
-            [ADB_EXE, "-s", device, "shell", "stat", "-c", "%A", file_path],
+            [ADB_EXE, "-s", device, "shell", f"stat -c %A {quoted_path}"],
             capture_output=True,
             text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
