@@ -1,27 +1,22 @@
 import os
 import json
-import re
 import subprocess
 import threading
 import time
 import logging
 import tkinter as tk
-from tkinter import messagebox, simpledialog, filedialog
+from tkinter import messagebox, simpledialog
 from tkinter import ttk  # For Treeview only
 import customtkinter as ctk
 from ui_theme import *
 
 from utils.login import InstagramLogin
-from config import LDCONSOLE_EXE, CONFIG_DIR, ADB_EXE, DATA_DIR
+from config import LDCONSOLE_EXE, ADB_EXE, VM_DATA_DIR, get_vm_id_from_name
 from constants import (
-    WAIT_SHORT, WAIT_MEDIUM, TIMEOUT_EXTENDED,
-    MAX_RETRY_VM_STATUS, VM_STATUS_CHECK_INTERVAL,
-    DEFAULT_VM_RESOLUTION, DEFAULT_VM_CPU, DEFAULT_VM_MEMORY,
-    DEFAULT_VM_DEVICES_NAME, DEFAULT_VM_DEVICES_MODEL,
-    ADB_DEBUG_SETTING
+    MAX_RETRY_VM_STATUS, VM_STATUS_CHECK_INTERVAL
 )
 
-os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(VM_DATA_DIR, exist_ok=True)
 
 
 class UsersTab(ctk.CTkFrame):
@@ -35,9 +30,7 @@ class UsersTab(ctk.CTkFrame):
         self.logger = logging.getLogger(__name__)
         self.login_handler = InstagramLogin(log_callback=self.write_log)
 
-        # Dictionary để lưu checkbox của từng máy ảo
-        self.checkboxes = {}
-        self.checkbox_vars = {}
+        # VM logs
         self.vm_logs = {}
         self.vm_logs_lock = threading.Lock()  # Thread safety for vm_logs
 
@@ -63,7 +56,7 @@ class UsersTab(ctk.CTkFrame):
         wrap = ctk.CTkFrame(table_frame, fg_color="transparent")
         wrap.pack(fill="both", expand=True, padx=DIMENSIONS["spacing_sm"], pady=DIMENSIONS["spacing_sm"])
 
-        cols = ("check","stt","vm","insta","user","pass","tfa","port","status","log","toggle","login","delete")
+        cols = ("stt","vm","insta","user","pass","tfa","port","status","log","toggle","login")
 
         # Apply ttk style for Treeview
         style = ttk.Style()
@@ -93,8 +86,6 @@ class UsersTab(ctk.CTkFrame):
         self.tree.tag_configure("evenrow", background=COLORS["bg_secondary"])
 
         # Header
-        self.select_all_var = tk.BooleanVar(value=False)
-        self.tree.heading("check", text="☐ ALL")
         self.tree.heading("stt",    text="STT")
         self.tree.heading("vm",     text="VM Name")
         self.tree.heading("insta",  text="Insta Name")
@@ -107,10 +98,8 @@ class UsersTab(ctk.CTkFrame):
         
         self.tree.heading("toggle", text="Chạy/Tắt")
         self.tree.heading("login",  text="Login")
-        self.tree.heading("delete", text="Xóa")
 
         # Width & align (đồng bộ, không lệch)
-        self.tree.column("check", width=70, anchor="center")
         self.tree.column("stt",    width=40,  anchor="center")
         self.tree.column("vm",     width=150)
         self.tree.column("insta",  width=150)
@@ -120,10 +109,9 @@ class UsersTab(ctk.CTkFrame):
         self.tree.column("port",   width=80,  anchor="center")
         self.tree.column("status", width=140, anchor="center")
         self.tree.column("log",    width=70,  anchor="center")
-        
+
         self.tree.column("toggle", width=90,  anchor="center")
         self.tree.column("login",  width=80,  anchor="center")
-        self.tree.column("delete", width=70,  anchor="center")
 
         # Scrollbar
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
@@ -148,35 +136,11 @@ class UsersTab(ctk.CTkFrame):
 
         ctk.CTkButton(
             btn_frame,
-            text="➕ Thêm máy ảo",
-            command=self.add_vm,
-            **get_button_style("success"),
-            width=140
-        ).pack(side="left", padx=DIMENSIONS["spacing_sm"])
-
-        ctk.CTkButton(
-            btn_frame,
-            text="📦 Cài ứng dụng",
-            command=self.install_app_to_selected,
-            **get_button_style("primary"),
-            width=140
-        ).pack(side="left", padx=DIMENSIONS["spacing_sm"])
-
-        ctk.CTkButton(
-            btn_frame,
-            text="📋 Copy máy ảo",
-            command=self.copy_vm,
+            text="🔌 Xem port",
+            command=self.show_adb_devices,
             **get_button_style("secondary"),
             width=140
         ).pack(side="left", padx=DIMENSIONS["spacing_sm"])
-
-        self.selected_count_label = ctk.CTkLabel(
-            btn_frame,
-            text="Đã chọn: 0 máy ảo",
-            font=(FONTS["family"], FONTS["size_normal"], FONTS["weight_semibold"]),
-            text_color=COLORS["accent"]
-        )
-        self.selected_count_label.pack(side="left", padx=DIMENSIONS["spacing_lg"])
 
         # Nạp dữ liệu
         self.refresh_list()
@@ -195,88 +159,98 @@ class UsersTab(ctk.CTkFrame):
         p = (port or "").strip()
         return f"emulator-{p}" if p.isdigit() else ""
 
-    def modify_vm_config(self, vm_id, vm_name, add_adb_debug=False, set_root_mode=False):
-        """
-        Modify VM config file to set device model and manufacturer.
-        Optionally add ADB debug setting and enable root mode.
-
-        Args:
-            vm_id: VM ID (e.g., "0", "1", "6")
-            vm_name: VM name for logging
-            add_adb_debug: If True, add ADB debug setting
-            set_root_mode: If True, set rootMode to true
-        """
+    # ======= Xem ADB Devices =======
+    def show_adb_devices(self):
+        """Hiển thị cửa sổ với kết quả lệnh 'adb devices'"""
+        # Chạy lệnh adb devices
         try:
-            config_path = os.path.join(CONFIG_DIR, f"leidian{vm_id}.config")
+            result = subprocess.run(
+                [ADB_EXE, "devices"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
 
-            if not os.path.exists(config_path):
-                self.logger.warning(f"Config file not found: {config_path}")
-                return False
-
-            # Read config file
-            with open(config_path, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            # Replace phoneModel
-            if '"propertySettings.phoneModel"' in content:
-                # Find and replace the phoneModel value
-                content = re.sub(
-                    r'"propertySettings\.phoneModel":\s*"[^"]*"',
-                    f'"propertySettings.phoneModel": "{DEFAULT_VM_DEVICES_MODEL}"',
-                    content
-                )
-                self.logger.info(f"Updated phoneModel to {DEFAULT_VM_DEVICES_MODEL}")
-
-            # Replace phoneManufacturer
-            if '"propertySettings.phoneManufacturer"' in content:
-                content = re.sub(
-                    r'"propertySettings\.phoneManufacturer":\s*"[^"]*"',
-                    f'"propertySettings.phoneManufacturer": "{DEFAULT_VM_DEVICES_NAME}"',
-                    content
-                )
-                self.logger.info(f"Updated phoneManufacturer to {DEFAULT_VM_DEVICES_NAME}")
-
-            # Set root mode to true if requested
-            if set_root_mode and '"basicSettings.rootMode"' in content:
-                content = re.sub(
-                    r'"basicSettings\.rootMode":\s*(false|true)',
-                    '"basicSettings.rootMode": true',
-                    content
-                )
-                self.logger.info("Enabled root mode (set to true)")
-
-            # Add ADB Debug if requested and not exists
-            if add_adb_debug and '"basicSettings.adbDebug"' not in content:
-                # Insert after opening brace
-                lines = content.splitlines(keepends=True)
-                if lines and lines[0].strip() == "{":
-                    lines.insert(1, "\n")
-                    lines.insert(2, f"    {ADB_DEBUG_SETTING}\n")
-                    content = "".join(lines)
-                    self.logger.info("Added ADB Debug setting")
-
-            # Write back
-            with open(config_path, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            self.logger.info(f"Successfully modified config for VM {vm_name} (ID: {vm_id})")
-            return True
-
+            output = result.stdout.strip()
+            if result.returncode != 0:
+                output = f"Error (returncode: {result.returncode}):\n{result.stderr}"
         except Exception as e:
-            self.logger.error(f"Failed to modify config for VM {vm_name}: {e}")
-            return False
+            output = f"Lỗi khi chạy lệnh adb devices:\n{str(e)}"
 
-    # ======= Chọn tất cả / Bỏ chọn tất cả =======
-    # def toggle_select_all(self):
-    #     select_state = self.select_all_var.get()
-    #     for var in self.checkbox_vars.values():
-    #         var.set(select_state)
-    #     self.update_selected_count()
+        # Tạo cửa sổ popup
+        popup = tk.Toplevel(self)
+        popup.title("ADB Devices - Danh sách Port")
+        popup.geometry("600x400")
+        popup.resizable(True, True)
 
-    # ======= Cập nhật số lượng đã chọn =======
-    def update_selected_count(self):
-        count = sum(1 for var in self.checkbox_vars.values() if var.get())
-        self.selected_count_label.configure(text=f"Đã chọn: {count} máy ảo")
+        # Frame tiêu đề
+        header_frame = ttk.Frame(popup)
+        header_frame.pack(fill="x", padx=10, pady=10)
+
+        ttk.Label(
+            header_frame,
+            text="📱 Kết quả lệnh: adb devices",
+            font=("Segoe UI", 11, "bold")
+        ).pack(side="left")
+
+        # Nút refresh
+        def refresh_output():
+            try:
+                result = subprocess.run(
+                    [ADB_EXE, "devices"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                new_output = result.stdout.strip()
+                if result.returncode != 0:
+                    new_output = f"Error (returncode: {result.returncode}):\n{result.stderr}"
+            except Exception as e:
+                new_output = f"Lỗi khi chạy lệnh adb devices:\n{str(e)}"
+
+            text_widget.config(state="normal")
+            text_widget.delete("1.0", "end")
+            text_widget.insert("1.0", new_output)
+            text_widget.config(state="disabled")
+
+        ttk.Button(
+            header_frame,
+            text="🔄 Làm mới",
+            command=refresh_output
+        ).pack(side="right", padx=5)
+
+        # Text widget hiển thị output
+        text_widget = tk.Text(
+            popup,
+            wrap="word",
+            state="disabled",
+            bg="#1e1e1e",
+            fg="#00ff00",
+            insertbackground="white",
+            font=("Consolas", 10)
+        )
+        text_widget.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(text_widget, command=text_widget.yview)
+        scrollbar.pack(side="right", fill="y")
+        text_widget.config(yscrollcommand=scrollbar.set)
+
+        # Hiển thị output
+        text_widget.config(state="normal")
+        text_widget.insert("1.0", output)
+        text_widget.config(state="disabled")
+
+        # Nút đóng
+        ttk.Button(
+            popup,
+            text="Đóng",
+            command=popup.destroy
+        ).pack(pady=(0, 10))
 
     # ======= Load / Refresh danh sách =======
     # Sửa lại refresh_list
@@ -284,19 +258,18 @@ class UsersTab(ctk.CTkFrame):
         for iid in self.tree.get_children():
             self.tree.delete(iid)
 
-        self.checkbox_vars = {}
-
         # Lấy tất cả VM từ LDPlayer list2
         all_vms = self.get_ld_list_full()  # [(id, name, status), ...]
 
-        # Kiểm tra và tạo file JSON cho các VM chưa có
+        # Kiểm tra và tạo/cập nhật file JSON cho các VM
         for vm_id, vm_name, status in all_vms:
             # Bỏ qua nếu tên VM trùng với file JSON đặc biệt
             if vm_name in self.RESERVED_FILENAMES:
                 self.logger.warning(f"VM name '{vm_name}' is reserved. Skipping JSON creation.")
                 continue
 
-            json_path = os.path.join(DATA_DIR, f"{vm_name}.json")
+            # ✅ v1.5.36: Lưu file theo {vm_id}.json thay vì {vm_name}.json
+            json_path = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
 
             # Nếu chưa có file JSON, tạo mới
             if not os.path.exists(json_path):
@@ -316,13 +289,41 @@ class UsersTab(ctk.CTkFrame):
                 except Exception as e:
                     self.logger.error(f"Failed to create JSON for {vm_name}: {e}")
                     continue
+            else:
+                # ✅ v1.5.36: Cập nhật vm_name nếu đã đổi tên
+                try:
+                    with open(json_path, "r", encoding="utf-8") as fp:
+                        data = json.load(fp)
+
+                    old_name = data.get("vm_name", "")
+                    if old_name != vm_name:
+                        data["vm_name"] = vm_name
+                        with open(json_path, "w", encoding="utf-8") as fp:
+                            json.dump(data, fp, ensure_ascii=False, indent=2)
+                        self.logger.info(f"Updated vm_name: {vm_id} ({old_name} -> {vm_name})")
+                except Exception as e:
+                    self.logger.error(f"Failed to update vm_name for {vm_id}: {e}")
+
+        # ✅ v1.5.36: Cleanup orphaned JSON files (VMs đã bị xóa)
+        try:
+            existing_ids = {vm_id for vm_id, _, _ in all_vms}
+            for filename in os.listdir(VM_DATA_DIR):
+                if filename.endswith(".json"):
+                    file_id = filename.replace(".json", "")
+                    if file_id not in existing_ids:
+                        orphan_path = os.path.join(VM_DATA_DIR, filename)
+                        os.remove(orphan_path)
+                        self.logger.info(f"Removed orphaned file: {filename} (VM khong con ton tai)")
+        except Exception as e:
+            self.logger.error(f"Error during orphaned files cleanup: {e}")
 
         # Hiển thị tất cả VM (bỏ qua các VM có tên reserved)
         displayed_vms = [(vm_id, vm_name, status_txt) for vm_id, vm_name, status_txt in all_vms
                          if vm_name not in self.RESERVED_FILENAMES]
 
         for idx, (vm_id, vm_name, status_txt) in enumerate(displayed_vms, start=1):
-            json_path = os.path.join(DATA_DIR, f"{vm_name}.json")
+            # ✅ v1.5.36: Đọc file theo {vm_id}.json
+            json_path = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
 
             # Đọc thông tin từ file JSON
             try:
@@ -339,35 +340,21 @@ class UsersTab(ctk.CTkFrame):
                 # Fallback nếu không đọc được
                 insta = username = password = tfa = port = ""
 
-            # Tạo biến checkbox cho từng VM
-            self.checkbox_vars[vm_name] = tk.BooleanVar(value=False)
-
-            # Thêm vào tree với icon checkbox và striped rows
-            icon = "☑" if self.checkbox_vars[vm_name].get() else "☐"
+            # Thêm vào tree với striped rows
             tag = "evenrow" if idx % 2 == 0 else "oddrow"
             self.tree.insert("", "end", iid=vm_name,
-                values=(icon, idx, vm_name, insta, username, password,
-                        tfa, port, status_txt, "📋", "▶/■", "Login", "✖"),
+                values=(idx, vm_name, insta, username, password,
+                        tfa, port, status_txt, "📋", "▶/■", "Login"),
                 tags=(tag,))
 
-        self.tree.heading("check", text="☑ Tất cả" if self.select_all_var.get() else "☐ Tất cả")
-        self.update_selected_count()
 
-
-    # Sửa lại on_tree_click_users
+    # Click handler for tree
     def on_tree_click_users(self, event):
         region = self.tree.identify("region", event.x, event.y)
-        
-        # Click vào header "Tất cả" để toggle all
-        if region == "heading":
-            col_id = self.tree.identify_column(event.x)
-            if col_id == "#1":  # Cột checkbox
-                self.toggle_select_all()
-            return
-        
+
         if region != "cell":
             return
-            
+
         row_id = self.tree.identify_row(event.y)
         col_id = self.tree.identify_column(event.x)
         if not row_id or not col_id:
@@ -375,18 +362,7 @@ class UsersTab(ctk.CTkFrame):
 
         col = self.tree["columns"][int(col_id[1:]) - 1]
 
-        # Xử lý click vào checkbox
-        if col == "check":
-            var = self.checkbox_vars.get(row_id)
-            if var:
-                var.set(not var.get())
-                # Cập nhật icon
-                new_icon = "☑" if var.get() else "☐"
-                self.tree.set(row_id, "check", new_icon)
-                self.update_selected_count()
-            return
-        
-        # Các cột hành động khác giữ nguyên
+        # Xử lý các cột hành động
         if col == "log":
             self.open_log_window(row_id)
         elif col == "toggle":
@@ -398,22 +374,6 @@ class UsersTab(ctk.CTkFrame):
 
         elif col == "login":
             self.login_vm(row_id)
-        elif col == "delete":
-            self.delete_vm(row_id)
-
-    # Thêm hàm toggle_select_all
-    def toggle_select_all(self):
-        new_state = not self.select_all_var.get()
-        self.select_all_var.set(new_state)
-
-        for vm_name, var in self.checkbox_vars.items():
-            var.set(new_state)
-            self.tree.set(vm_name, "check", "☑" if new_state else "☐")
-
-        self.tree.heading("check", text="☑ Tất cả" if new_state else "☐ Tất cả")
-        self.update_selected_count()
-
-
 
     # def write_log(self, vm_name, msg):
     #     self.vm_logs.setdefault(vm_name, []).append(msg)
@@ -495,402 +455,6 @@ class UsersTab(ctk.CTkFrame):
                 self._ui(_append)
 
 
-
-    # ======= Cài ứng dụng cho các máy đã chọn =======
-    def install_app_to_selected(self):
-        # Lấy danh sách máy được chọn
-        selected_vms = [vm_name for vm_name, var in self.checkbox_vars.items() if var.get()]
-        
-        if not selected_vms:
-            messagebox.showwarning("Chưa chọn máy ảo", 
-                                  "Vui lòng chọn ít nhất một máy ảo từ danh sách!")
-            return
-        
-        # Chọn file APK/XAPK
-        apk_path = filedialog.askopenfilename(
-            title="Chọn file cài đặt (APK/XAPK)",
-            filetypes=[("Android App Package", "*.apk *.xapk"), ("All files", "*.*")]
-        )
-        
-        if not apk_path:
-            return
-        
-        # Xác nhận cài đặt
-        confirm = messagebox.askyesno(
-            "Xác nhận cài đặt",
-            f"Bạn có chắc muốn cài {os.path.basename(apk_path)}\nvào {len(selected_vms)} máy ảo đã chọn?"
-        )
-        
-        if not confirm:
-            return
-        
-        # Cài đặt song song bằng threading
-        messagebox.showinfo("Đang cài đặt", 
-                           f"Đang cài {os.path.basename(apk_path)} vào {len(selected_vms)} máy ảo...")
-        
-        for vm_name in selected_vms:
-            # Đọc dữ liệu cũ từ JSON (nếu có)
-            path = os.path.join(DATA_DIR, f"{vm_name}.json")
-            try:
-                with open(path, "r", encoding="utf-8") as fp:
-                    data = json.load(fp)
-                    port = str(data.get("port", "")).strip()   # chỉ lưu số, vd "5554"
-                    if not port.isdigit():
-                        self.write_log(vm_name, "⚠️ Port rỗng hoặc không hợp lệ trong JSON.")
-                        continue
-                    device = self.to_device_id(port)
-            except Exception as e:
-                self.logger.error(f"Error reading VM config for {vm_name}: {e}")
-            threading.Thread(
-                target=self.install_apk_to_vm,
-                args=(vm_name, device, apk_path),
-                daemon=True
-            ).start()
-
-    def install_apk_to_vm(self, vm_name, device, apk_path):
-        try:
-            if not device or not device.startswith("emulator-"):
-                self.write_log(vm_name, f"⚠️ Device id không hợp lệ: {device}")
-                return
-
-            self.write_log(vm_name, f"⏳ Đang cài {os.path.basename(apk_path)}...")
-            cmd = [ADB_EXE, "-s", device, "install", "-r", apk_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-            if result.stdout:
-                self.write_log(vm_name, f"📝 Output: {result.stdout.strip()}")
-            if result.stderr:
-                self.write_log(vm_name, f"⚠️ Error: {result.stderr.strip()}")
-
-            if result.returncode == 0:
-                self.write_log(vm_name, f"✅ Cài thành công {os.path.basename(apk_path)}")
-            else:
-                self.write_log(vm_name, f"❌ Lỗi (code {result.returncode}) khi cài ứng dụng")
-
-        except subprocess.TimeoutExpired:
-            self.write_log(vm_name, f"⏱️ Timeout khi cài ứng dụng")
-        except Exception as e:
-            self.write_log(vm_name, f"❌ Lỗi khi cài: {e}")
-
-
-    # ======= Hàm thêm máy ảo =======
-    def add_vm(self):
-        # Tạo custom dialog để nhập tên
-        dialog = tk.Toplevel(self)
-        dialog.title("Thêm máy ảo")
-        dialog.geometry("480x180")
-        dialog.resizable(False, False)
-        dialog.grab_set()
-
-        # Frame chính
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Label
-        ttk.Label(main_frame, text="Tên máy ảo mới:",
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
-
-        # Entry
-        name_var = tk.StringVar()
-        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=50)
-        name_entry.pack(fill=tk.X, pady=(0, 5))
-        name_entry.focus()
-
-        # Lưu ý
-        ttk.Label(main_frame, text="⚠️ Lưu ý: Không đặt tên tiếng Việt hoặc có khoảng trắng",
-                 font=("Segoe UI", 9), foreground="red").pack(anchor="w", pady=(0, 15))
-
-        # Result storage
-        result = {"vm_name": None}
-
-        def on_submit():
-            vm_name = name_var.get().strip()
-            if not vm_name:
-                messagebox.showwarning("Lỗi", "Vui lòng nhập tên máy ảo!", parent=dialog)
-                return
-
-            # Kiểm tra tên có phải là reserved filename không
-            if vm_name in self.RESERVED_FILENAMES:
-                messagebox.showerror("Tên không hợp lệ",
-                    f"Tên '{vm_name}' là tên dành riêng của hệ thống!\n"
-                    f"Vui lòng chọn tên khác!",
-                    parent=dialog)
-                return
-
-            # Kiểm tra xem file .json tương ứng đã tồn tại chưa
-            path = os.path.join(DATA_DIR, f"{vm_name}.json")
-            if os.path.exists(path):
-                messagebox.showerror("Tên đã tồn tại",
-                    f"Máy ảo '{vm_name}' đã có trong dữ liệu.\n"
-                    f"Vui lòng nhập tên khác!",
-                    parent=dialog)
-                return
-
-            result["vm_name"] = vm_name
-            dialog.destroy()
-
-        def on_cancel():
-            dialog.destroy()
-
-        # Buttons
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X)
-
-        ttk.Button(btn_frame, text="✅ Tạo", command=on_submit,
-                  width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Hủy", command=on_cancel,
-                  width=15).pack(side=tk.LEFT, padx=5)
-
-        # Chờ dialog đóng
-        dialog.wait_window()
-
-        vm_name = result["vm_name"]
-        if not vm_name:
-            return
-
-        # === Tạo máy ảo thật trong LDPlayer ===
-        try:
-            subprocess.run([LDCONSOLE_EXE, "add", "--name", vm_name],
-                        creationflags=subprocess.CREATE_NO_WINDOW)
-            subprocess.run([LDCONSOLE_EXE, "modify", "--name", vm_name,
-                            "--resolution", DEFAULT_VM_RESOLUTION,
-                            "--cpu", DEFAULT_VM_CPU,
-                            "--memory", DEFAULT_VM_MEMORY],
-                        creationflags=subprocess.CREATE_NO_WINDOW)
-            time.sleep(1)
-            result = subprocess.run(
-                [LDCONSOLE_EXE, "list2"],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            vm_id = None
-            for line in result.stdout.strip().splitlines():
-                parts = line.split(",")
-                if len(parts) >= 2 and parts[1].strip() == vm_name:
-                    vm_id = parts[0].strip()
-                    break
-
-            if vm_id:
-                # Modify config: Add ADB Debug + Enable Root Mode + Change device model/manufacturer
-                self.modify_vm_config(vm_id, vm_name, add_adb_debug=True, set_root_mode=True)
-            else:
-                self.logger.warning(f"Cannot determine VM ID for {vm_name}. Skipping config modification.")
-
-
-            messagebox.showinfo("Thành công",
-                                f"Đã tạo máy ảo {vm_name}")
-        except Exception as e:
-            self.logger.exception(f"Error creating VM {vm_name}")
-            messagebox.showerror("Lỗi", f"Không thể tạo máy ảo mới:\n{e}")
-            return
-
-        # === Lưu dữ liệu vào data/ ===
-        path = os.path.join(DATA_DIR, f"{vm_name}.json")
-        data = {
-            "id":vm_id,
-            "vm_name": vm_name,
-            "insta_name": "",
-            "username": "",
-            "password": "",
-            "2fa": "",
-            "port":""
-        }
-        with open(path, "w", encoding="utf-8") as fp:
-            json.dump(data, fp, ensure_ascii=False, indent=2)
-
-        self.refresh_list()
-
-    # ======= Hàm copy máy ảo =======
-    def copy_vm(self):
-        """Copy máy ảo với logic đơn giản"""
-
-        # Lấy danh sách VM hiện có từ LDPlayer
-        all_vms = self.get_ld_list_full()  # [(id, name, status), ...]
-
-        if not all_vms:
-            messagebox.showwarning("Copy máy ảo", "Không có máy ảo nào trong hệ thống!")
-            return
-
-        vm_names = [vm[1] for vm in all_vms]  # Lấy danh sách tên VM
-
-        # Tạo dialog chọn VM nguồn và nhập tên mới
-        dialog = tk.Toplevel(self)
-        dialog.title("Copy máy ảo")
-        dialog.geometry("520x260")
-        dialog.resizable(False, False)
-        dialog.grab_set()
-
-        # Frame chính
-        main_frame = ttk.Frame(dialog, padding=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Chọn VM nguồn
-        ttk.Label(main_frame, text="Chọn máy ảo để copy:",
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
-
-        source_var = tk.StringVar()
-        source_combo = ttk.Combobox(main_frame, textvariable=source_var,
-                                    values=vm_names, state="readonly", width=55)
-        source_combo.pack(fill=tk.X, pady=(0, 15))
-        if vm_names:
-            source_combo.current(0)
-
-        # Nhập tên VM mới
-        ttk.Label(main_frame, text="Tên máy ảo mới:",
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
-
-        new_name_var = tk.StringVar()
-        new_name_entry = ttk.Entry(main_frame, textvariable=new_name_var, width=57)
-        new_name_entry.pack(fill=tk.X, pady=(0, 5))
-        new_name_entry.focus()
-
-        # Lưu ý
-        ttk.Label(main_frame, text="⚠️ Lưu ý: Không đặt tên tiếng Việt hoặc có khoảng trắng",
-                 font=("Segoe UI", 9), foreground="red").pack(anchor="w", pady=(0, 15))
-
-        # Buttons
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(5, 0))
-
-        def do_copy():
-            source_vm = source_var.get()
-            new_vm = new_name_var.get().strip()
-
-            if not source_vm:
-                messagebox.showwarning("Lỗi", "Vui lòng chọn máy ảo nguồn!", parent=dialog)
-                return
-
-            if not new_vm:
-                messagebox.showwarning("Lỗi", "Vui lòng nhập tên máy ảo mới!", parent=dialog)
-                return
-
-            # Kiểm tra tên có phải là reserved filename không
-            if new_vm in self.RESERVED_FILENAMES:
-                messagebox.showerror("Tên không hợp lệ",
-                    f"Tên '{new_vm}' là tên dành riêng của hệ thống!\n"
-                    f"Vui lòng chọn tên khác.",
-                    parent=dialog)
-                return
-
-            # Kiểm tra tên trùng với VM hiện có
-            if new_vm in vm_names:
-                messagebox.showerror("Lỗi",
-                    f"Tên máy ảo '{new_vm}' đã tồn tại!\nVui lòng chọn tên khác.",
-                    parent=dialog)
-                return
-
-            # Kiểm tra VM nguồn có đang chạy không
-            source_status = None
-            for vm_id, vm_name, status in all_vms:
-                if vm_name == source_vm:
-                    source_status = status
-                    break
-
-            if source_status == "Bật":
-                messagebox.showwarning("Không thể copy",
-                    f"Máy ảo '{source_vm}' đang chạy!\n\n"
-                    f"Vui lòng tắt máy ảo trước khi copy.",
-                    parent=dialog)
-                return
-
-            # Đóng dialog trước khi thực hiện
-            dialog.destroy()
-
-            # Thực hiện copy trong thread riêng
-            def run_copy():
-                try:
-                    self.write_log(new_vm, f"🔄 Bắt đầu copy từ '{source_vm}'...")
-
-                    # Chạy lệnh ldconsole copy
-                    cmd = [LDCONSOLE_EXE, "copy", "--name", new_vm, "--from", source_vm]
-                    self.logger.info(f"Executing: {' '.join(cmd)}")
-
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        errors='ignore',
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                        timeout=120
-                    )
-
-                    self.logger.info(f"Copy return code: {result.returncode}")
-                    if result.stdout:
-                        self.logger.info(f"Copy stdout: {result.stdout}")
-                    if result.stderr:
-                        self.logger.info(f"Copy stderr: {result.stderr}")
-
-                    # Đợi một chút để LDPlayer xử lý
-                    time.sleep(3)
-
-                    # Kiểm tra xem VM mới đã được tạo chưa bằng cách query lại
-                    verify_result = subprocess.run(
-                        [LDCONSOLE_EXE, "list2"],
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                        timeout=10
-                    )
-
-                    vm_created = False
-                    new_vm_id = None
-                    for line in verify_result.stdout.splitlines():
-                        parts = line.split(",")
-                        if len(parts) >= 2 and parts[1].strip() == new_vm:
-                            vm_created = True
-                            new_vm_id = parts[0].strip()
-                            break
-
-                    if not vm_created:
-                        # VM không được tạo - thực sự lỗi
-                        error_msg = f"Lỗi khi copy máy ảo:\n\n"
-                        error_msg += f"Return code: {result.returncode}\n"
-                        if result.stdout:
-                            error_msg += f"Output: {result.stdout}\n"
-                        if result.stderr:
-                            error_msg += f"Error: {result.stderr}\n"
-                        error_msg += f"\nMáy ảo '{new_vm}' không được tạo."
-
-                        self.write_log(new_vm, f"❌ {error_msg}")
-                        self._ui(lambda: messagebox.showerror("Lỗi Copy", error_msg))
-                        return
-
-                    # VM đã được tạo - coi như thành công
-                    self.write_log(new_vm, f"✅ Copy thành công từ '{source_vm}'")
-                    self.logger.info(f"VM '{new_vm}' has been created successfully (ID: {new_vm_id})")
-
-                    # Modify config: Change device model/manufacturer (KHÔNG thêm ADB Debug và Root Mode)
-                    if new_vm_id:
-                        self.write_log(new_vm, "🔧 Đang cập nhật cấu hình thiết bị...")
-                        self.modify_vm_config(new_vm_id, new_vm, add_adb_debug=False, set_root_mode=False)
-                    else:
-                        self.logger.warning(f"Cannot determine VM ID for {new_vm}. Skipping config modification.")
-
-                    # Refresh danh sách để tự động tạo file JSON
-                    self._ui(self.refresh_list)
-
-                    # Thông báo thành công
-                    self._ui(lambda: messagebox.showinfo("Thành công",
-                        f"Đã copy máy ảo '{source_vm}' thành '{new_vm}'"))
-
-                except subprocess.TimeoutExpired:
-                    self.write_log(new_vm, "⏱️ Timeout khi copy máy ảo!")
-                    self._ui(lambda: messagebox.showerror("Lỗi", "Timeout khi copy máy ảo!"))
-                except Exception as e:
-                    self.logger.exception(f"Error copying VM")
-                    self.write_log(new_vm, f"❌ Lỗi khi copy: {e}")
-                    self._ui(lambda: messagebox.showerror("Lỗi", f"Không thể copy máy ảo:\n{e}"))
-
-            # Chạy trong thread riêng để không block UI
-            threading.Thread(target=run_copy, daemon=True).start()
-
-        ttk.Button(btn_frame, text="✅ Copy", command=do_copy,
-                  width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Hủy", command=dialog.destroy,
-                  width=15).pack(side=tk.LEFT, padx=5)
 
     # ===== Hàm bật/tắt =====
     def toggle_vm(self, name, status_label, btn_toggle):
@@ -1017,34 +581,21 @@ class UsersTab(ctk.CTkFrame):
             self.logger.error(f"Error getting LDPlayer list: {e}")
             return []
 
-    # ===== Xóa máy ảo =====
-    def delete_vm(self, name):
-        confirm = messagebox.askyesno("Xác nhận",
-                                     f"Bạn có chắc muốn xóa {name}?")
-        if not confirm:
-            return
-        try:
-            subprocess.run([LDCONSOLE_EXE, "remove", "--name", name], 
-                          creationflags=subprocess.CREATE_NO_WINDOW)
-            path = os.path.join(DATA_DIR, f"{name}.json")
-            if os.path.exists(path):
-                os.remove(path)
-            time.sleep(1)
-            self.refresh_list()
-            self.logger.info(f"Successfully deleted VM: {name}")
-        except Exception as e:
-            self.logger.exception(f"Error deleting VM {name}")
-            messagebox.showerror("Lỗi", f"Không thể xóa {name}:\n{e}")
-
     # ===== Login demo =====
     def login_vm(self, name):
         """Fixed version với logic rõ ràng hơn"""
-        
+
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(name)
+        if not vm_id:
+            messagebox.showerror("Lỗi", f"Không tìm thấy file cấu hình cho máy ảo '{name}'")
+            return
+
         # Đọc dữ liệu cũ từ JSON
-        path = os.path.join(DATA_DIR, f"{name}.json")
+        path = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         existing_data = ""
         existing_port = ""
-        
+
         try:
             with open(path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)

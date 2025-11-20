@@ -10,6 +10,7 @@ import json
 import requests
 import uiautomator2 as u2
 
+from config import VM_DATA_DIR, get_vm_id_from_name
 from utils.base_instagram import BaseInstagramAutomation
 from constants import (
     WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG,
@@ -236,7 +237,13 @@ class InstagramLogin(BaseInstagramAutomation):
         Returns:
             bool: True if saved successfully
         """
-        path = os.path.join("data", f"{vm_name}.json")
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            self.log(vm_name, f"⚠️ Không tìm thấy file cấu hình cho máy ảo: {vm_name}", "ERROR")
+            return False
+
+        path = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         try:
             with open(path, "r", encoding="utf-8") as fp:
                 file_data = json.load(fp)

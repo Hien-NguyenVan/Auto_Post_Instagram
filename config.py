@@ -62,15 +62,9 @@ def find_ldplayer_path():
 
     # 3. Check common paths
     common_paths = [
-        r"C:\LDPlayer\LDPlayer9",
-        r"C:\LDPlayer\LDPlayer4",
-        r"C:\Program Files\LDPlayer9",
-        r"C:\Program Files\LDPlayer",
-        r"C:\Program Files (x86)\LDPlayer9",
-        r"C:\Program Files (x86)\LDPlayer",
-        r"D:\LDPlayer\LDPlayer9",
-        r"D:\LDPlayer\LDPlayer4",
-        r"E:\LDPlayer\LDPlayer9",
+        r"C:\SD-Farm-LD_Player",
+        r"D:\SD-Farm-LD_Player",
+        r"E:\SD-Farm-LD_Player",
     ]
 
     for path in common_paths:
@@ -111,6 +105,13 @@ CONFIG_DIR = os.path.join(LDPLAYER_PATH, "vms", "config")
 DATA_DIR = os.path.join(APP_DIR, "data")
 USER_DATA_DIR = DATA_DIR
 
+# VM configurations directory (NEW: v1.5.36 - Restructured)
+VM_DATA_DIR = os.path.join(DATA_DIR, "vm")
+
+# Schedule directory (NEW: v1.5.36 - Restructured)
+SCHEDULE_DATA_DIR = os.path.join(DATA_DIR, "schedule")
+SCHEDULED_POSTS_FILE = os.path.join(SCHEDULE_DATA_DIR, "scheduled_posts.json")
+
 # Output directory for stream results
 OUTPUT_DIR = os.path.join(DATA_DIR, "output")
 
@@ -132,11 +133,55 @@ LOG_FILE = os.path.join(LOG_DIR, "app.log")
 LOG_FORMAT = '%(asctime)s | %(name)s | %(levelname)s | %(message)s'
 LOG_LEVEL = "INFO"  # Can be: DEBUG, INFO, WARNING, ERROR, CRITICAL
 
+# ==================== HELPER FUNCTIONS ====================
+def get_vm_id_from_name(vm_name):
+    """
+    Tìm VM ID từ tên máy ảo bằng cách scan thư mục VM_DATA_DIR.
+
+    Args:
+        vm_name: Tên máy ảo (VD: "test1", "SD-Farm-2")
+
+    Returns:
+        str: VM ID nếu tìm thấy, None nếu không tìm thấy
+
+    Example:
+        >>> get_vm_id_from_name("SD-Farm-2")
+        "2"  # Trả về VM ID
+    """
+    import json
+
+    if not os.path.exists(VM_DATA_DIR):
+        return None
+
+    try:
+        for filename in os.listdir(VM_DATA_DIR):
+            if not filename.endswith(".json"):
+                continue
+
+            filepath = os.path.join(VM_DATA_DIR, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                # Check if vm_name matches
+                if data.get("vm_name") == vm_name:
+                    # Return vm_id (filename without .json)
+                    return filename.replace(".json", "")
+            except Exception:
+                # Skip invalid JSON files
+                continue
+    except Exception:
+        pass
+
+    return None
+
 # ==================== ENSURE DIRECTORIES EXIST ====================
 def ensure_app_directories():
     """Create necessary directories if they don't exist."""
     dirs_to_create = [
         DATA_DIR,
+        VM_DATA_DIR,           # NEW: v1.5.36
+        SCHEDULE_DATA_DIR,     # NEW: v1.5.36
         OUTPUT_DIR,
         os.path.join(DATA_DIR, "api"),
         TEMP_DIR,

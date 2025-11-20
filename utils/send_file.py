@@ -1,14 +1,12 @@
 import os
 import subprocess
 import json
-from config import ADB_EXE
-
-DATA_DIR = os.path.join(os.getcwd(), "data")
+from config import ADB_EXE, VM_DATA_DIR, get_vm_id_from_name
 
 
 def send_file_api(local_path, vm_name, adb_path=None, log_callback=None):
     """
-    Gửi file từ PC sang LDPlayer dựa vào file /data/<vm_name>.json
+    Gửi file từ PC sang LDPlayer dựa vào file /data/vm/{vm_id}.json
 
     Args:
         local_path: Đường dẫn file trên PC
@@ -22,15 +20,21 @@ def send_file_api(local_path, vm_name, adb_path=None, log_callback=None):
     # ✅ Dùng ADB_EXE từ config nếu không truyền vào
     if adb_path is None:
         adb_path = ADB_EXE
-   
+
     try:
         # 🔹 1️⃣ Kiểm tra file tồn tại
         if not os.path.exists(local_path):
             log(f"❌ File không tồn tại: {local_path}")
             return False
 
-        # 🔹 2️⃣ Đọc thông tin máy ảo từ /data/<vm_name>.json
-        vm_file = os.path.join(DATA_DIR, f"{vm_name}.json")
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            log(f"❌ Không tìm thấy file cấu hình cho máy ảo: {vm_name}")
+            return False
+
+        # 🔹 2️⃣ Đọc thông tin máy ảo từ /data/vm/{vm_id}.json
+        vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         if not os.path.exists(vm_file):
             log(f"❌ Không tìm thấy file cấu hình: {vm_file}")
             return False

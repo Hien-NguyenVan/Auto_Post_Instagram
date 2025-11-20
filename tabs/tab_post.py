@@ -22,7 +22,7 @@ from tkinter import ttk  # For Treeview only
 import customtkinter as ctk
 from ui_theme import *
 
-from config import LDCONSOLE_EXE, DATA_DIR, ADB_EXE
+from config import LDCONSOLE_EXE, VM_DATA_DIR, ADB_EXE, SCHEDULED_POSTS_FILE, get_vm_id_from_name
 from constants import WAIT_MEDIUM, WAIT_LONG, WAIT_SHORT, WAIT_EXTRA_LONG, TIMEOUT_MINUTE
 from utils.send_file import send_file_api
 from utils.post import InstagramPost
@@ -54,7 +54,6 @@ from utils.text_utils import remove_keywords_from_text, parse_keywords_input, re
 
 # ==================== CONSTANTS ====================
 VN_TZ = timezone(timedelta(hours=7))
-SCHEDULED_POSTS_FILE = os.path.join("data", "scheduled_posts.json")
 SCHEDULED_VIDEOS_DIR = os.path.join("temp", "scheduled")
 os.makedirs(SCHEDULED_VIDEOS_DIR, exist_ok=True)
 
@@ -276,19 +275,9 @@ def load_scheduled_posts():
 
 def save_scheduled_posts(posts):
     """Save scheduled posts to JSON - Safe version with backup"""
-    # ⚠️ SAFETY CHECK: Không save nếu posts rỗng và file cũ có data!
-    if not posts and os.path.exists(SCHEDULED_POSTS_FILE):
-        try:
-            with open(SCHEDULED_POSTS_FILE, "r", encoding="utf-8") as f:
-                old_data = json.load(f)
-            old_count = len(old_data.get("posts", []))
-
-            if old_count > 0:
-                logging.warning(f"⚠️ PREVENTED DATA LOSS: Refusing to save empty list when {old_count} posts exist!")
-                logging.warning(f"   If you really want to clear all posts, delete the file manually.")
-                return
-        except:
-            pass  # Nếu file cũ corrupt, cho phép save
+    # ✅ v1.5.37: Removed overly-strict safety check
+    # Backup mechanism (below) is sufficient to prevent accidental data loss
+    # User should be able to delete all posts if they want to
 
     try:
         # Backup file cũ trước khi save
@@ -309,15 +298,15 @@ def save_scheduled_posts(posts):
 
 
 def get_vm_list_with_insta():
-    """Lấy danh sách máy ảo kèm tên Instagram từ data/"""
+    """Lấy danh sách máy ảo kèm tên Instagram từ data/vm/"""
     vm_list = []
     try:
-        if not os.path.exists(DATA_DIR):
+        if not os.path.exists(VM_DATA_DIR):
             return vm_list
 
-        files = [f for f in os.listdir(DATA_DIR) if f.endswith(".json")]
+        files = [f for f in os.listdir(VM_DATA_DIR) if f.endswith(".json")]
         for f in files:
-            path = os.path.join(DATA_DIR, f)
+            path = os.path.join(VM_DATA_DIR, f)
             with open(path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 vm_name = data.get("vm_name", "")
@@ -453,8 +442,18 @@ class PostScheduler(threading.Thread):
                     save_scheduled_posts(self.posts)
                     return
 
+            # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+            vm_id = get_vm_id_from_name(post.vm_name)
+            if not vm_id:
+                post.log(f"❌ Không tìm thấy file cấu hình cho VM: {post.vm_name}")
+                post.status = "failed"
+                self.ui_queue.put(("status_update", post.id, "failed"))
+                self.running_posts.discard(post.id)
+                save_scheduled_posts(self.posts)
+                return
+
             # Get VM info
-            vm_file = os.path.join(DATA_DIR, f"{post.vm_name}.json")
+            vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
             if not os.path.exists(vm_file):
                 post.log(f"❌ Không tìm thấy thông tin VM: {post.vm_name}")
                 post.status = "failed"
@@ -1331,14 +1330,29 @@ class PostTab(ctk.CTkFrame):
         table_outer = ctk.CTkFrame(self, fg_color="transparent")
         table_outer.pack(fill=tk.BOTH, expand=True, padx=DIMENSIONS["spacing_md"], pady=(DIMENSIONS["spacing_sm"], DIMENSIONS["spacing_md"]))
 
-        # Title for table
+        # Title bar with refresh button
+        title_bar = ctk.CTkFrame(table_outer, fg_color="transparent")
+        title_bar.pack(fill=tk.X, pady=(0, DIMENSIONS["spacing_xs"]))
+
+        # Title label (left)
         table_title = ctk.CTkLabel(
-            table_outer,
+            title_bar,
             text="📋 Danh Sách Video Đã Lên Lịch",
             font=(FONTS["family"], FONTS["size_medium"], FONTS["weight_semibold"]),
             text_color=COLORS["text_primary"]
         )
-        table_title.pack(anchor="w", pady=(0, DIMENSIONS["spacing_xs"]))
+        table_title.pack(side=tk.LEFT)
+
+        # Refresh button (right)
+        refresh_btn = ctk.CTkButton(
+            title_bar,
+            text="🔄 Làm mới",
+            command=lambda: self.load_posts_to_table(auto_sort=True),
+            **get_button_style("secondary"),
+            width=100,
+            height=28
+        )
+        refresh_btn.pack(side=tk.RIGHT)
 
         # Table container with panel style
         table_container = ctk.CTkFrame(table_outer, **get_frame_style("panel"))
@@ -1836,7 +1850,7 @@ class PostTab(ctk.CTkFrame):
             # Add to posts list
             self.posts.extend(new_posts)
             save_scheduled_posts(self.posts)
-            self.load_posts_to_table()
+            self.load_posts_to_table(auto_sort=True)  # ← FIX: Force reload với data mới
 
             platform_display = "YouTube" if platform == "youtube" else "TikTok"
             messagebox.showinfo(
@@ -2984,7 +2998,7 @@ class PostTab(ctk.CTkFrame):
             self.posts.clear()
             self.posts.extend(imported_posts)
             save_scheduled_posts(self.posts)
-            self.load_posts_to_table()
+            self.load_posts_to_table(auto_sort=True)  # ← FIX: Force reload sau import CSV
 
             # Show result
             if errors:
@@ -3232,7 +3246,7 @@ class PostTab(ctk.CTkFrame):
 
         # Save và refresh
         save_scheduled_posts(self.posts)
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ← FIX: Force reload với data mới
         messagebox.showinfo(
             "Thành công",
             f"Đã thêm {len(files)} video vào danh sách.\nClick vào cột ⚙️ để đặt lịch cho từng video."
@@ -3642,7 +3656,7 @@ class PostTab(ctk.CTkFrame):
 
         # Lưu và refresh
         save_scheduled_posts(self.posts)
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ← FIX: Force reload sau khi xóa
 
         messagebox.showinfo("Thành công", f"Đã xóa {len(selected_ids)} video")
 
@@ -4008,7 +4022,7 @@ class PostTab(ctk.CTkFrame):
         # Xóa trực tiếp không cần confirm
         self.posts.remove(post)
         save_scheduled_posts(self.posts)
-        self.load_posts_to_table()
+        self.load_posts_to_table(auto_sort=True)  # ← FIX: Force reload sau delete
 
     def start_scheduler(self):
         """Start background scheduler"""

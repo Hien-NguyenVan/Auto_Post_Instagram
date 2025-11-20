@@ -34,7 +34,7 @@ from utils.file_checker import verify_file_after_push
 from utils.vm_manager import vm_manager
 from utils.text_utils import remove_keywords_from_text, remove_all_hashtags
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from config import LDCONSOLE_EXE, ADB_EXE
+from config import LDCONSOLE_EXE, ADB_EXE, VM_DATA_DIR, get_vm_id_from_name
 from constants import WAIT_SHORT, WAIT_MEDIUM, WAIT_LONG, WAIT_EXTRA_LONG, TIMEOUT_DEFAULT, TIMEOUT_MINUTE
 from utils.api_manager_multi import multi_api_manager
 from utils.tiktok_api_rapidapi import (
@@ -143,8 +143,6 @@ class StoppableWorker:
         self.executor.shutdown(wait=False)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-# Đường dẫn đến thư mục data của tab_user
-USER_DATA_DIR = os.path.join(os.getcwd(), "data")
 
 from utils.yt_api import (
     extract_channel_id,
@@ -160,15 +158,15 @@ from utils.yt_api import (
 
 
 def get_vm_list_with_insta():
-    """Lấy danh sách máy ảo kèm tên Instagram từ data/"""
+    """Lấy danh sách máy ảo kèm tên Instagram từ data/vm/"""
     vm_list = []
     try:
-        if not os.path.exists(USER_DATA_DIR):
+        if not os.path.exists(VM_DATA_DIR):
             return vm_list
-        
-        files = [f for f in os.listdir(USER_DATA_DIR) if f.endswith(".json")]
+
+        files = [f for f in os.listdir(VM_DATA_DIR) if f.endswith(".json")]
         for f in files:
-            path = os.path.join(USER_DATA_DIR, f)
+            path = os.path.join(VM_DATA_DIR, f)
             with open(path, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 vm_name = data.get("vm_name", "")
@@ -557,7 +555,13 @@ class Stream:
                                 continue
 
                             # ========== CHỜ ADB KẾT NỐI ==========
-                            vm_file = os.path.join("data", f"{vm_name}.json")
+                            # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+                            vm_id = get_vm_id_from_name(vm_name)
+                            if not vm_id:
+                                self.log(f"❌ Không tìm thấy file cấu hình cho VM: {vm_name}")
+                                continue
+
+                            vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
                             with open(vm_file, "r", encoding="utf-8") as f:
                                 vm_info = json.load(f)
                             port = vm_info.get("port")
@@ -688,9 +692,14 @@ class Stream:
 
                             # Clear DCIM and Pictures folders before sending file
                             try:
+                                # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+                                vm_id = get_vm_id_from_name(vm_name)
+                                if not vm_id:
+                                    self.log(f"❌ Không tìm thấy file cấu hình cho VM: {vm_name}")
+                                    raise Exception(f"VM config not found: {vm_name}")
+
                                 # Read port from JSON to create adb_address
-                                from config import DATA_DIR
-                                json_path = os.path.join(DATA_DIR, f"{vm_name}.json")
+                                json_path = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
                                 with open(json_path, "r", encoding="utf-8") as f:
                                     vm_info = json.load(f)
                                 port = vm_info.get("port")
@@ -790,7 +799,20 @@ class Stream:
 
                             self.log(f"📲 Đang đăng video: {title}")
 
-                            vm_file = os.path.join("data", f"{vm_name}.json")
+                            # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+                            vm_id = get_vm_id_from_name(vm_name)
+                            if not vm_id:
+                                self.log(f"❌ Không tìm thấy file cấu hình cho VM: {vm_name}")
+                                self.log(f"🛑 Tắt máy ảo '{vm_name}'...")
+                                self.worker_helper.run_subprocess(
+                                    [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                    timeout=30
+                                )
+                                vm_manager.wait_vm_stopped(vm_name, LDCONSOLE_EXE, timeout=60)
+                                time.sleep(WAIT_EXTRA_LONG)
+                                break
+
+                            vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
                             with open(vm_file, "r", encoding="utf-8") as f:
                                 vm_info = json.load(f)
                             port = vm_info.get("port")
@@ -1807,50 +1829,46 @@ class FollowTab(ctk.CTkFrame):
 
             if vms_to_check:
                 import subprocess
-                from config import get_ldconsole_path
-                ldconsole = get_ldconsole_path()
+                try:
+                    # List tất cả VMs đang chạy
+                    result = subprocess.run(
+                        [LDCONSOLE_EXE, "list2"],
+                        capture_output=True,
+                        text=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=10
+                    )
 
-                if ldconsole:
-                    try:
-                        # List tất cả VMs đang chạy
-                        result = subprocess.run(
-                            [ldconsole, "list2"],
-                            capture_output=True,
-                            text=True,
-                            creationflags=subprocess.CREATE_NO_WINDOW,
-                            timeout=10
-                        )
+                    running_vms = set()
+                    for line in result.stdout.splitlines():
+                        parts = line.split(",")
+                        if len(parts) >= 5:
+                            vm_name = parts[1].strip()
+                            is_running = (parts[4].strip() == "1")
+                            if is_running and vm_name in vms_to_check:
+                                running_vms.add(vm_name)
 
-                        running_vms = set()
-                        for line in result.stdout.splitlines():
-                            parts = line.split(",")
-                            if len(parts) >= 5:
-                                vm_name = parts[1].strip()
-                                is_running = (parts[4].strip() == "1")
-                                if is_running and vm_name in vms_to_check:
-                                    running_vms.add(vm_name)
+                    self.logger.info(f"🔍 Tìm thấy {len(running_vms)} VMs đang chạy: {running_vms}")
 
-                        self.logger.info(f"🔍 Tìm thấy {len(running_vms)} VMs đang chạy: {running_vms}")
+                    # Tắt từng VM đang chạy
+                    for vm_name in running_vms:
+                        try:
+                            self.logger.info(f"   🛑 Tắt VM: {vm_name}")
+                            subprocess.run(
+                                [LDCONSOLE_EXE, "quit", "--name", vm_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                timeout=10
+                            )
+                            self.logger.info(f"   ✅ Đã gửi lệnh tắt VM: {vm_name}")
+                        except Exception as e:
+                            self.logger.error(f"   ❌ Lỗi khi tắt VM {vm_name}: {e}")
 
-                        # Tắt từng VM đang chạy
-                        for vm_name in running_vms:
-                            try:
-                                self.logger.info(f"   🛑 Tắt VM: {vm_name}")
-                                subprocess.run(
-                                    [ldconsole, "quit", "--name", vm_name],
-                                    creationflags=subprocess.CREATE_NO_WINDOW,
-                                    timeout=10
-                                )
-                                self.logger.info(f"   ✅ Đã gửi lệnh tắt VM: {vm_name}")
-                            except Exception as e:
-                                self.logger.error(f"   ❌ Lỗi khi tắt VM {vm_name}: {e}")
+                    if len(running_vms) > 0:
+                        self.logger.info("⏳ Chờ 3 giây để VMs tắt...")
+                        time.sleep(3)
 
-                        if len(running_vms) > 0:
-                            self.logger.info("⏳ Chờ 3 giây để VMs tắt...")
-                            time.sleep(3)
-
-                    except Exception as e:
-                        self.logger.error(f"❌ Lỗi khi check/tắt VMs: {e}")
+                except Exception as e:
+                    self.logger.error(f"❌ Lỗi khi check/tắt VMs: {e}")
 
             self.logger.info("=" * 50)
             self.logger.info("✅ CLEANUP TAB_FOLLOW HOÀN TẤT")

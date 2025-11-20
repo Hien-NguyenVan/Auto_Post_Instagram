@@ -7,9 +7,7 @@ import subprocess
 import json
 import os
 import shlex
-from config import ADB_EXE
-
-DATA_DIR = os.path.join(os.getcwd(), "data")
+from config import ADB_EXE, VM_DATA_DIR, get_vm_id_from_name
 
 
 def check_file_exists_in_vm(vm_name, file_path, log_callback=None):
@@ -31,8 +29,14 @@ def check_file_exists_in_vm(vm_name, file_path, log_callback=None):
     log = log_callback or (lambda msg: print(msg))
 
     try:
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            log(f"❌ Không tìm thấy file cấu hình VM cho: {vm_name}")
+            return False
+
         # 1. Get VM port from config
-        vm_file = os.path.join(DATA_DIR, f"{vm_name}.json")
+        vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         if not os.path.exists(vm_file):
             log(f"❌ Không tìm thấy file cấu hình VM: {vm_file}")
             return False
@@ -94,8 +98,14 @@ def check_file_with_size(vm_name, file_path, log_callback=None):
     log = log_callback or (lambda msg: print(msg))
 
     try:
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            log(f"❌ Không tìm thấy file cấu hình VM cho: {vm_name}")
+            return False, 0.0
+
         # 1. Get VM port
-        vm_file = os.path.join(DATA_DIR, f"{vm_name}.json")
+        vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         if not os.path.exists(vm_file):
             log(f"❌ Không tìm thấy file cấu hình VM: {vm_file}")
             return False, 0.0
@@ -253,8 +263,13 @@ def check_file_permissions(vm_name, file_path, log_callback=None):
     log = log_callback or (lambda msg: print(msg))
 
     try:
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            return False, ""
+
         # Get VM port
-        vm_file = os.path.join(DATA_DIR, f"{vm_name}.json")
+        vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         if not os.path.exists(vm_file):
             return False, ""
 
@@ -308,8 +323,14 @@ def _retry_broadcast_mediastore(vm_name, remote_path, log_callback=None):
     log = log_callback or (lambda msg: print(msg))
 
     try:
+        # ✅ v1.5.36: Tìm VM ID từ tên máy ảo
+        vm_id = get_vm_id_from_name(vm_name)
+        if not vm_id:
+            log(f"⚠️ Không tìm thấy file cấu hình VM cho: {vm_name}")
+            return
+
         # Get VM port
-        vm_file = os.path.join(DATA_DIR, f"{vm_name}.json")
+        vm_file = os.path.join(VM_DATA_DIR, f"{vm_id}.json")
         with open(vm_file, "r", encoding="utf-8") as f:
             vm_info = json.load(f)
 
