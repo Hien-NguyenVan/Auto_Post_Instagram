@@ -49,6 +49,7 @@ XPATH_SKIP_BUTTON = '//*[@text="Skip"]'
 XPATH_DENY_BUTTON = '//*[@text="DENY"]'
 XPATH_CANCEL_BUTTON = '//*[@text="Cancel"]'
 
+
 # Instagram UI elements (resource IDs)
 RESOURCE_ID_FEED_TAB = "com.instagram.android:id/feed_tab"
 RESOURCE_ID_PROFILE_TAB = "com.instagram.android:id/profile_tab"
@@ -73,7 +74,7 @@ RESOURCE_ID_POST = "com.instagram.android:id/cam_dest_feed"
 RESOURCE_SHARE_TO = "com.instagram.android:id/clips_nux_sheet_share_button"
 RESOURCE_FIRST_BOX = "com.instagram.android:id/gallery_grid_item_thumbnail"
 RESOURCE_progress_bar = "com.instagram.android:id/row_pending_container"
-
+RESOURCE_NOT_SHARE = "com.instagram.android:id/clips_original_audio_nux_sheet_turn_off_and_share_button"
 
 # XPath for resource IDs (formatted)
 XPATH_FEED_TAB = f'//*[@resource-id="{RESOURCE_ID_FEED_TAB}"]'
@@ -102,7 +103,7 @@ XPATH_progress_bar = f'//*[@resource-id="{RESOURCE_progress_bar}"]'
 # Content descriptions
 CONTENT_DESC_CREATE_NEW = '//*[@content-desc="Create New"]'
 CONTENT_DESC_CREATE_POST = '//*[@content-desc="Create new post"]'
-
+XPATH_NOT_SHARE = f'//*[@resource-id="{RESOURCE_NOT_SHARE}"]'
 # ==================== API CONSTANTS ====================
 # 2FA API endpoint
 TWOFA_API_URL = "https://2fa.live/tok/{key}"

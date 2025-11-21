@@ -524,34 +524,64 @@ class PostScheduler(threading.Thread):
                         if is_running:
                             # VM đang chạy → Reboot để đảm bảo trạng thái sạch (QUEUE-BASED)
                             post.log(f"⚠️ Máy ảo '{post.vm_name}' đang chạy - Reboot để đảm bảo trạng thái sạch")
-        
+
                             # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
                             # LDPlayer sẽ tự động setup lại ADB connection khi reboot
-        
-                            subprocess.run(
+
+                            result = subprocess.run(
                                 [LDCONSOLE_EXE, "reboot", "--name", post.vm_name],
-                                creationflags=subprocess.CREATE_NO_WINDOW
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                errors="ignore"
                             )
+                            if result.returncode != 0:
+                                post.log(f"⚠️ Reboot command returncode: {result.returncode}")
+                                if result.stderr:
+                                    post.log(f"⚠️ Reboot stderr: {result.stderr.strip()}")
+                                if result.stdout:
+                                    post.log(f"ℹ️ Reboot stdout: {result.stdout.strip()}")
                         else:
                             # VM chưa chạy → Bật mới
                             post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
-        
+
                             # ✅ KHÔNG reset ADB server toàn cục (ảnh hưởng tất cả VMs khác!)
                             # LDPlayer sẽ tự động setup lại ADB connection khi launch
-        
-                            subprocess.run(
+
+                            result = subprocess.run(
                                 [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
-                                creationflags=subprocess.CREATE_NO_WINDOW
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                capture_output=True,
+                                text=True,
+                                encoding="utf-8",
+                                errors="ignore"
                             )
+                            if result.returncode != 0:
+                                post.log(f"⚠️ Launch command returncode: {result.returncode}")
+                                if result.stderr:
+                                    post.log(f"⚠️ Launch stderr: {result.stderr.strip()}")
+                                if result.stdout:
+                                    post.log(f"ℹ️ Launch stdout: {result.stdout.strip()}")
         
                     except Exception as e:
                         post.log(f"⚠️ Không thể kiểm tra trạng thái VM: {e}")
                         # Nếu lỗi kiểm tra, cố gắng bật VM
                         post.log(f"🚀 Bật máy ảo '{post.vm_name}'...")
-                        subprocess.run(
+                        result = subprocess.run(
                             [LDCONSOLE_EXE, "launch", "--name", post.vm_name],
-                            creationflags=subprocess.CREATE_NO_WINDOW
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="ignore"
                         )
+                        if result.returncode != 0:
+                            post.log(f"⚠️ Launch command returncode: {result.returncode}")
+                            if result.stderr:
+                                post.log(f"⚠️ Launch stderr: {result.stderr.strip()}")
+                            if result.stdout:
+                                post.log(f"ℹ️ Launch stdout: {result.stdout.strip()}")
         
                     # Wait for VM to be fully ready
                     post.log(f"⏳ Chờ máy ảo '{post.vm_name}' khởi động hoàn toàn...")

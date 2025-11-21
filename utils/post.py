@@ -17,7 +17,7 @@ from constants import (
     XPATH_INSTAGRAM_APP, XPATH_FEED_TAB, XPATH_PROMO_BUTTON, XPATH_CREATE_POST,
     XPATH_PROFILE_TAB, XPATH_NEXT_BUTTON, XPATH_RETRY_MEDIA, XPATH_RIGHT_ACTION,
     XPATH_DOWNLOAD_NUX, XPATH_PRIMARY_ACTION, XPATH_CAPTION_INPUT,
-    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,XPATH_SHARE_TO,
+    XPATH_ACTION_BAR_TEXT, XPATH_SHARE_BUTTON, XPATH_SHARE_BUTTON_2,XPATH_ALLOW_2, XPATH_CANCEL_BUTTON_ID,XPATH_SHARE_TO,XPATH_NOT_SHARE,
     XPATH_PENDING_MEDIA, XPATH_ACTION_LEFT_CONTAINER,XPATH_POST,XPATH_FIRST_BOX,XPATH_progress_bar,
     CONTENT_DESC_CREATE_NEW, CONTENT_DESC_CREATE_POST,
     CHROME_PACKAGE, INSTAGRAM_PACKAGE, RESOURCE_ID_LEFT_ACTION
@@ -391,6 +391,11 @@ class InstagramPost(BaseInstagramAutomation):
             self.safe_click(d, XPATH_SHARE_TO, sleep_after=1,
                           vm_name=vm_name, optional=True, timeout=2)
 
+            #click not share
+            self.log(vm_name, "🔑 Nhấn no share")
+            self.safe_click(d, XPATH_NOT_SHARE, sleep_after=1,
+                          vm_name=vm_name, optional=True, timeout=2)
+                          
             # Click "No thanks" if exists
             # self.log(vm_name, "🔑 Nhấn No thanks (nếu có)")
             # self.safe_click(d, XPATH_CANCEL_BUTTON_ID, sleep_after=1,
